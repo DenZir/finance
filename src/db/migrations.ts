@@ -149,4 +149,28 @@ export const MIGRATIONS: readonly string[] = [
   -- пришедшие из аналитики просто ещё не разобраны.
   ALTER TABLE ad_deals ADD COLUMN waiting_at INTEGER;
   `,
+  `
+  -- Оплаты VPN-бота идут в свои кабинеты Platega (8 %) и CryptoBot (3 %), не в
+  -- кабинеты привата (владелец, 2026-10-19). role — по ней импорт находит
+  -- кошелёк, а не по названию: название владелец может поменять, и «Platega VPN»
+  -- по слову «platega» подошёл бы и к оплатам привата.
+  ALTER TABLE wallets ADD COLUMN role TEXT;
+  INSERT INTO wallets (name, currency, kind, fee_pct, created_at, role) VALUES
+    ('Platega VPN', 'RUB', 'provider', 8, CAST(strftime('%s','now') AS INTEGER) * 1000, 'vpn:platega'),
+    ('CryptoBot VPN', 'USDT', 'provider', 3, CAST(strftime('%s','now') AS INTEGER) * 1000, 'vpn:cryptobot');
+
+  -- Оплаты VPN из tg-analytics. Записанная — это операция с source = 'vpn' и
+  -- source_ref = ref. Платёжку передаёт VPN-бот; не передал — оплата ждёт, пока
+  -- владелец выберет её руками. skipped_at — «Не учитывать» (тестовая оплата и т. п.).
+  CREATE TABLE vpn_payments (
+    ref        TEXT PRIMARY KEY,            -- номер события в аналитике
+    at         INTEGER NOT NULL,            -- UTC мс
+    type       TEXT    NOT NULL,            -- payment | renewal
+    amount     INTEGER NOT NULL,            -- ₽-микро, фактически полученные
+    provider   TEXT,                        -- platega | cryptobot | null
+    skipped_at INTEGER,
+    synced_at  INTEGER NOT NULL
+  );
+  CREATE INDEX vpn_payments_at ON vpn_payments(at);
+  `,
 ];

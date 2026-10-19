@@ -14,6 +14,8 @@ export interface Config {
   botprivat: { url: string; key: string; since: number } | null;
   /** сделки рекламы из tg-analytics; null — выключены */
   analytics: { url: string; key: string; since: number } | null;
+  /** имя проекта VPN в tg-analytics — оплаты VPN оттуда; null — выключены */
+  vpnProject: string | null;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -51,6 +53,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const botprivat = source('BOTPRIVAT_URL', 'BOTPRIVAT_KEY', 'ботприватa, например http://127.0.0.1:30003', 'его FINANCE_API_KEY');
   const analytics = source('ANALYTICS_URL', 'ANALYTICS_KEY', 'tg-analytics, например http://127.0.0.1:3000', 'его FINANCE_KEY');
 
+  // Оплаты VPN берутся из той же аналитики тем же ключом — нужно только имя проекта.
+  const vpnProject = (env.VPN_PROJECT ?? '').trim() || null;
+  if (vpnProject && !(env.ANALYTICS_URL ?? '').trim()) problems.push('VPN_PROJECT — оплаты VPN берутся из tg-analytics: заполните ANALYTICS_URL и ANALYTICS_KEY');
+
   if (problems.length) throw new Error(`Настройки не заполнены:\n- ${problems.join('\n- ')}`);
-  return { port, dbPath: env.DB_PATH || './data/finance.db', botToken, botUsername, ownerIds, botprivat, analytics };
+  return { port, dbPath: env.DB_PATH || './data/finance.db', botToken, botUsername, ownerIds, botprivat, analytics, vpnProject };
 }

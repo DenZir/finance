@@ -18,6 +18,7 @@ import {
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
 import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
+import { listUnsorted, resolveVpn } from './vpn.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -185,6 +186,21 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   app.post('/api/ad-deals/bulk', (req, res) => {
     const b = req.body ?? {};
     res.json(bulkMark(db, b.refs, b.action, now()));
+  });
+
+  // --- VPN ---------------------------------------------------------------------
+  app.get('/api/vpn/unsorted', (_req, res) => {
+    res.json(listUnsorted(db));
+  });
+
+  // Платёжка для оплат, о которой VPN-бот не сказал; refs и action проверяет resolveVpn.
+  app.post('/api/vpn/resolve', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      res.json(await resolveVpn(db, b.refs, b.action, fetchRate, now()));
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.post('/api/ad-deals/:ref/pay', async (req, res, next) => {

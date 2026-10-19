@@ -45,9 +45,9 @@ const saveCursor = (db: Db, cursor: number) =>
 const exists = (db: Db, ref: string) =>
   !!db.prepare('SELECT 1 FROM operations WHERE source = ? AND source_ref = ?').get(SOURCE, ref);
 
-/** Кошелёк платёжки по имени провайдера: «Platega», «CryptoBot». */
+/** Кошелёк платёжки по имени провайдера: «Platega», «CryptoBot». Кошельки с ролью (VPN) — чужие кабинеты. */
 function providerWallet(db: Db, provider: string) {
-  return listWallets(db).find((w) => !w.archived && w.kind === 'provider' && w.name.toLowerCase().includes(provider.toLowerCase()));
+  return listWallets(db).find((w) => !w.archived && !w.role && w.kind === 'provider' && w.name.toLowerCase().includes(provider.toLowerCase()));
 }
 
 export async function importBotprivat(

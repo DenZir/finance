@@ -19,6 +19,8 @@ export interface Wallet {
   kind: WalletKind;
   feePct: number;
   archived: boolean;
+  /** для импорта: vpn:platega, vpn:cryptobot; null — обычный кошелёк */
+  role: string | null;
 }
 
 export interface Project {
@@ -35,7 +37,7 @@ export interface Category {
 
 export function listWallets(db: Db): Wallet[] {
   return (db.prepare('SELECT * FROM wallets ORDER BY archived, id').all() as any[]).map((w) => ({
-    id: w.id, name: w.name, currency: w.currency, kind: w.kind, feePct: w.fee_pct, archived: w.archived === 1,
+    id: w.id, name: w.name, currency: w.currency, kind: w.kind, feePct: w.fee_pct, archived: w.archived === 1, role: w.role ?? null,
   }));
 }
 

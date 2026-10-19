@@ -4,6 +4,7 @@ import { coingecko } from './rates.js';
 import { createApp } from './server.js';
 import { httpOrders, importBotprivat } from './import/botprivat.js';
 import { httpDeals, syncDeals } from './ads.js';
+import { httpPayments, syncVpn } from './vpn.js';
 
 const config = readConfig();
 const db = openDb(config.dbPath);
@@ -56,6 +57,29 @@ if (an) {
   setTimeout(pull, 15_000);
   setInterval(pull, 5 * 60_000);
   console.log(`[ads] сделки рекламы из ${an.url}`);
+}
+
+// Оплаты VPN — из той же аналитики, раз в 5 минут.
+const vpnProject = config.vpnProject;
+if (an && vpnProject) {
+  let running = false;
+  const pull = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const r = await syncVpn(db, { fetchPayments: httpPayments(an.url, an.key, vpnProject), fetchRate: coingecko, since: an.since });
+      if (r.booked) console.log(`[vpn] оплат VPN записано: ${r.booked}`);
+      if (r.imported && r.unsorted) console.log(`[vpn] без платёжки, ждут разбора: ${r.unsorted}`);
+      if (r.waiting.length) console.warn(`[vpn] часть оплат ждёт: ${r.waiting.join('; ')}`);
+    } catch (err) {
+      console.warn('[vpn] tg-analytics недоступна:', err instanceof Error ? err.message : err);
+    } finally {
+      running = false;
+    }
+  };
+  setTimeout(pull, 20_000);
+  setInterval(pull, 5 * 60_000);
+  console.log(`[vpn] оплаты VPN — проект «${vpnProject}» в ${an.url}`);
 }
 
 const stop = (signal: string) => {

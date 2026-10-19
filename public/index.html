@@ -46,6 +46,21 @@
       </div>
     </section>
 
+    <section class="card" id="vpnCard" hidden>
+      <div class="card-h"><h2>VPN — разобрать</h2></div>
+      <p class="hint vpn-hint">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией.</p>
+      <div id="vpn"></div>
+      <div class="ads-bar" id="vpnBar" hidden>
+        <span id="vpnPicked"></span>
+        <div class="ads-bar-b">
+          <button class="btn" type="button" data-vbulk="platega">Platega</button>
+          <button class="btn" type="button" data-vbulk="cryptobot">CryptoBot</button>
+          <button class="btn" type="button" data-vbulk="skip" title="Тестовая оплата и т. п. — в доход не идёт">Не учитывать</button>
+          <button class="btn ghost" type="button" data-vbulk-clear>Снять выбор</button>
+        </div>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-h"><h2>Кошельки</h2><button class="btn" id="addWallet" type="button">+ Кошелёк</button></div>
       <div id="wallets" class="wallets"></div>

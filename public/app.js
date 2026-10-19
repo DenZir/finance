@@ -17,6 +17,8 @@ let deals = [];
 let adsAll = false;
 let payRef = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
+let vpnRows = []; // оплаты VPN без платёжки
+let vpnPicked = new Set();
 
 function monthOf(ms) {
   const d = new Date(ms + MSK);
@@ -176,6 +178,55 @@ function syncPick() {
   $('#adsPicked').innerHTML = `<b>Выбрано ${list.length}</b> · ${money}${noSum ? ` <span class="muted">· без суммы: ${noSum}</span>` : ''}`;
 }
 
+// --- VPN: оплаты без платёжки ----------------------------------------------------
+const stamp = (ms) => `${day(ms)} ${new Date(ms + MSK).toISOString().slice(11, 16)}`;
+
+function renderVpn() {
+  vpnPicked.clear();
+  syncVpnPick();
+  $('#vpnCard').hidden = !vpnRows.length;
+  if (!vpnRows.length) return;
+  const total = vpnRows.reduce((s, p) => s + p.amount, 0);
+  $('#vpn').innerHTML =
+    `<h3 class="ads-h"><label class="pick"><input type="checkbox" data-vpick-all aria-label="Выбрать все">Без платёжки · ${vpnRows.length} · ${rub(total)}</label></h3>` +
+    vpnRows
+      .map((p) => {
+        const ref = esc(p.ref);
+        return `<div class="deal"><span class="when"><label class="pick"><input type="checkbox" data-vpick="${ref}">${day(p.at)}</label></span>
+          <div class="what"><b>${p.type === 'renewal' ? 'Продление' : 'Покупка'}</b><small>${stamp(p.at)} по Москве</small></div>
+          <div class="sum"><span class="plus">+${rub(p.amount)}</span></div>
+          <div class="acts"><button class="btn" type="button" data-vone="platega" data-ref="${ref}">Platega</button><button class="btn" type="button" data-vone="cryptobot" data-ref="${ref}">CryptoBot</button><button class="btn ghost" type="button" data-vone="skip" data-ref="${ref}" title="Не учитывать: тестовая оплата и т. п.">×</button></div></div>`;
+      })
+      .join('');
+}
+
+function syncVpnPick() {
+  const boxes = [...document.querySelectorAll('[data-vpick]')];
+  const all = $('[data-vpick-all]');
+  const n = boxes.filter((x) => x.checked).length;
+  if (all) {
+    all.checked = n > 0 && n === boxes.length;
+    all.indeterminate = n > 0 && n < boxes.length;
+  }
+  const list = vpnRows.filter((p) => vpnPicked.has(p.ref));
+  $('#vpnBar').hidden = !list.length;
+  if (list.length) $('#vpnPicked').innerHTML = `<b>Выбрано ${list.length}</b> · <span class="plus">+${rub(list.reduce((s, p) => s + p.amount, 0))}</span>`;
+}
+
+async function resolveVpn(refs, action, buttons) {
+  for (const x of buttons) x.disabled = true;
+  try {
+    const r = await api('/api/vpn/resolve', { method: 'POST', body: JSON.stringify({ refs, action }) });
+    await load();
+    toast(`${action === 'skip' ? 'Не учитываются' : `Записано на ${action === 'platega' ? 'Platega VPN' : 'CryptoBot VPN'}`}: ${r.done}${r.skipped ? `, пропущено: ${r.skipped}` : ''}`);
+  } catch (err) {
+    toast(err.message);
+    await load().catch(() => {});
+  } finally {
+    for (const x of buttons) x.disabled = false;
+  }
+}
+
 function openPay(ref) {
   const d = deals.find((x) => x.ref === ref);
   if (!d) return;
@@ -196,10 +247,11 @@ function openPay(ref) {
 }
 
 // За рекламу платят переводом на CryptoBot: он первым, а платёжки, принимающие
-// оплату картой (Platega), в список не попадают.
+// оплату картой (Platega), в список не попадают. Кабинеты VPN (с ролью) — тоже:
+// это деньги, поделённые с партнёром.
 const adWallets = () =>
   S.wallets
-    .filter((w) => !w.archived && (w.kind !== 'provider' || /cryptobot/i.test(w.name)))
+    .filter((w) => !w.archived && !w.role && (w.kind !== 'provider' || /cryptobot/i.test(w.name)))
     .sort((a, b) => /cryptobot/i.test(b.name) - /cryptobot/i.test(a.name));
 
 // сумма сделки — в рублях; на кошелёк в другой валюте подставляем по курсу
@@ -282,7 +334,7 @@ function opLine(o) {
     sum = `<span class="${o.kind === 'income' ? 'plus' : 'minus'}">${o.kind === 'income' ? '+' : '−'}${rub(o.grossRub)}</span>`;
     sub = [wallet && esc(wallet.name), o.kind === 'income' && o.feeRub ? `комиссия ${rub(o.feeRub)}` : '', wallet && wallet.currency !== 'RUB' && a ? amt(Math.abs(a.amount), wallet.currency) : ''].filter(Boolean).join(' · ');
   }
-  const meta = [OP_LABEL[o.kind], o.projectId && o.kind !== 'payout' ? esc(nameOf(S.projects, o.projectId)) : '', esc(o.note), o.source === 'botprivat' ? 'авто · ботприват' : o.source === 'ads' ? 'сделка рекламы' : ''].filter(Boolean).join(' · ');
+  const meta = [OP_LABEL[o.kind], o.projectId && o.kind !== 'payout' ? esc(nameOf(S.projects, o.projectId)) : '', esc(o.note), o.source === 'botprivat' ? 'авто · ботприват' : o.source === 'ads' ? 'сделка рекламы' : o.source === 'vpn' ? 'авто · VPN' : ''].filter(Boolean).join(' · ');
   return `<div class="op"><span class="when">${day(o.at)}</span><div class="what"><b>${title}</b><small>${meta}</small></div><div class="sum">${sum}<small>${sub}</small></div><button class="del" type="button" data-del="${o.id}" aria-label="Удалить операцию">×</button></div>`;
 }
 
@@ -296,6 +348,7 @@ async function load() {
   ]);
   S = state;
   deals = ads;
+  vpnRows = await api('/api/vpn/unsorted');
   $('#login').hidden = true;
   $('#app').hidden = false;
   if (location.search) history.replaceState(null, '', '/');
@@ -310,6 +363,7 @@ async function load() {
   $('#reportTitle').textContent = byYear ? 'Итоги года' : 'Итоги месяца';
   renderTiles(byYear ? report.total : report);
   renderAds();
+  renderVpn();
   renderWallets();
   $('#report').innerHTML = byYear ? yearHtml(report) : reportHtml(report);
   $('#ops').innerHTML = byYear
@@ -469,6 +523,25 @@ $('#adsBar').addEventListener('click', async (e) => {
   } finally {
     for (const x of buttons) x.disabled = false;
   }
+});
+$('#vpn').addEventListener('change', (e) => {
+  if (e.target.closest('[data-vpick-all]')) for (const x of document.querySelectorAll('[data-vpick]')) x.checked = e.target.checked;
+  else if (!e.target.closest('[data-vpick]')) return;
+  vpnPicked = new Set([...document.querySelectorAll('[data-vpick]:checked')].map((x) => x.dataset.vpick));
+  syncVpnPick();
+});
+$('#vpn').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-vone]');
+  if (!b) return;
+  if (b.dataset.vone === 'skip' && !confirm('Не учитывать эту оплату? В доход она не пойдёт.')) return;
+  resolveVpn([b.dataset.ref], b.dataset.vone, b.parentElement.querySelectorAll('button'));
+});
+$('#vpnBar').addEventListener('click', (e) => {
+  if (e.target.closest('[data-vbulk-clear]')) return renderVpn();
+  const b = e.target.closest('[data-vbulk]');
+  if (!b || !vpnPicked.size) return;
+  if (b.dataset.vbulk === 'skip' && !confirm(`Не учитывать выбранные оплаты (${vpnPicked.size})? В доход они не пойдут.`)) return;
+  resolveVpn([...vpnPicked], b.dataset.vbulk, $('#vpnBar').querySelectorAll('button'));
 });
 $('#adsAll').addEventListener('click', () => {
   adsAll = !adsAll;

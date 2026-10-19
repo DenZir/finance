@@ -43,6 +43,9 @@ export function httpDeals(url: string, key: string): FetchDeals {
   };
 }
 
+/** Номер сделки, как его отдаёт аналитика: buy:12 / sale:5. */
+const REF = /^(buy|sale):\d+$/;
+
 /** ГГГГ-ММ-ДД по Москве. */
 const mskDate = (ms: number) => new Date(ms + 3 * 3600_000).toISOString().slice(0, 10);
 
@@ -63,7 +66,7 @@ export async function syncDeals(db: Db, deps: { fetchDeals: FetchDeals; since: n
   let added = 0;
   db.transaction(() => {
     for (const d of deals) {
-      if (!/^(buy|sale):\d+$/.test(d.ref) || (d.kind !== 'buy' && d.kind !== 'sale')) continue;
+      if (!REF.test(d.ref) || (d.kind !== 'buy' && d.kind !== 'sale')) continue;
       if (!known.has(d.ref)) added++;
       upsert.run({
         ref: d.ref,
@@ -186,4 +189,45 @@ export function setWaiting(db: Db, ref: string, on: boolean, now = Date.now()): 
   const d = getDeal(db, ref);
   if (on && d.state === 'paid') throw new MoneyInputError('сделка уже оплачена');
   db.prepare(on ? 'UPDATE ad_deals SET waiting_at = ?, barter_at = NULL WHERE ref = ?' : 'UPDATE ad_deals SET waiting_at = ? WHERE ref = ?').run(on ? now : null, ref);
+}
+
+export type BulkAction = 'waiting' | 'barter' | 'unsort';
+const BULK_ACTIONS: readonly BulkAction[] = ['waiting', 'barter', 'unsort'];
+/** Неразобранных у владельца под сотню; предел — чтобы запрос не тянул таблицу без конца. */
+const BULK_MAX = 500;
+
+/**
+ * Отметка списком: «Ждём оплату», «Бартер» или «Не разобрана» на многих сделках
+ * разом — восемь десятков неразобранных по одной не разобрать (владелец,
+ * 2026-10-19). Каждая — как отметка по одной (setWaiting / setBarter), и всё
+ * одной транзакцией, чтобы «Нам должны» не сошлись наполовину. Оплаченные и
+ * неизвестные пропускаются, а не роняют список: оплату снимают удалением
+ * операции. Сделка, уже стоящая в этом состоянии, не трогается и в «Отмечено»
+ * не входит.
+ */
+export function bulkMark(db: Db, refs: readonly string[], action: BulkAction, now = Date.now()): { changed: number; skipped: number } {
+  if (!BULK_ACTIONS.includes(action)) throw new MoneyInputError('неизвестная отметка');
+  if (!Array.isArray(refs) || refs.length === 0) throw new MoneyInputError('не выбрано ни одной сделки');
+  if (refs.length > BULK_MAX) throw new MoneyInputError(`за раз — не больше ${BULK_MAX} сделок`);
+  for (const ref of refs) {
+    if (typeof ref !== 'string' || !REF.test(ref)) throw new MoneyInputError(`«${String(ref).slice(0, 40)}» — не сделка`);
+  }
+  const target = action === 'unsort' ? 'open' : action;
+  const mark = db.prepare('UPDATE ad_deals SET waiting_at = ?, barter_at = ? WHERE ref = ?');
+  return db.transaction(() => {
+    const byRef = new Map(listDeals(db).map((d) => [d.ref, d]));
+    let changed = 0;
+    let skipped = 0;
+    for (const ref of new Set(refs)) {
+      const d = byRef.get(ref);
+      if (!d || d.state === 'paid') {
+        skipped++;
+        continue;
+      }
+      if (d.state === target) continue;
+      mark.run(action === 'waiting' ? now : null, action === 'barter' ? now : null, ref);
+      changed++;
+    }
+    return { changed, skipped };
+  })();
 }

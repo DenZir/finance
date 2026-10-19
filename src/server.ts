@@ -17,7 +17,7 @@ import {
   type WalletKind,
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
-import { adDebts, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
+import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -175,6 +175,12 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   // --- реклама ---------------------------------------------------------------
   app.get('/api/ad-deals', (_req, res) => {
     res.json(listDeals(db));
+  });
+
+  // Отметка списком; refs и action проверяет bulkMark.
+  app.post('/api/ad-deals/bulk', (req, res) => {
+    const b = req.body ?? {};
+    res.json(bulkMark(db, b.refs, b.action, now()));
   });
 
   app.post('/api/ad-deals/:ref/pay', async (req, res, next) => {

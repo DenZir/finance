@@ -13,6 +13,7 @@ let opKind = 'income';
 let deals = [];
 let adsAll = false;
 let payRef = null;
+let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
 
 function monthOf(ms) {
   const d = new Date(ms + MSK);
@@ -100,7 +101,11 @@ function dealAge(date) {
   return days < 0 ? `${-days} дн. назад` : `через ${days} дн.`;
 }
 
-function dealLine(d) {
+// отметить списком можно то, что ещё ждёт решения: не оплаченное, не бартер, не отменённое
+const pickable = (d) => (d.state === 'open' || d.state === 'waiting') && !d.cancelled;
+
+// group — в какой группе строка («Ждём оплату», «Не разобраны»); без группы («Все сделки») выбора нет
+function dealLine(d, group) {
   const sum = d.amount == null ? '<span class="muted">суммы ещё нет</span>' : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(d.amount)}</span>`;
   const ref = esc(d.ref);
   const waitLabel = d.kind === 'sale' ? 'Ждём оплату' : 'Надо оплатить';
@@ -114,30 +119,58 @@ function dealLine(d) {
     acts = `<button class="btn primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
   const done = d.state === 'paid' || d.state === 'barter' || d.cancelled;
   const sub = [esc(d.contact), esc(d.channels), d.state === 'waiting' && !d.cancelled ? `<span class="age">${dealAge(d.date)}</span>` : ''].filter(Boolean).join(' · ');
-  return `<div class="deal${done ? ' done' : ''}"><span class="when">${dealDay(d.date)}</span>
+  const when = !group
+    ? dealDay(d.date)
+    : pickable(d)
+      ? `<label class="pick"><input type="checkbox" data-pick="${ref}" data-g="${group}">${dealDay(d.date)}</label>`
+      : `<span class="pick-gap"></span>${dealDay(d.date)}`;
+  return `<div class="deal${done ? ' done' : ''}"><span class="when">${when}</span>
     <div class="what"><b>${dealTitle(d)}</b><small>${sub}</small></div>
     <div class="sum">${sum}</div><div class="acts">${acts}</div></div>`;
 }
 
 function renderAds() {
+  picked.clear();
+  syncPick();
   $('#adsCard').hidden = !deals.length;
   if (!deals.length) return;
   $('#adsAll').textContent = adsAll ? 'Свернуть' : 'Все сделки';
   if (adsAll) {
     const all = [...deals].sort((a, b) => b.date.localeCompare(a.date));
-    $('#ads').innerHTML = all.map(dealLine).join('');
+    $('#ads').innerHTML = all.map((d) => dealLine(d)).join('');
     return;
   }
   // ждём оплату — самые давние сверху: они первые, кому пора напомнить;
   // оплаченная, но отменённая в аналитике тоже на виду
   const waiting = deals.filter((d) => (d.state === 'waiting' && !d.cancelled) || (d.state === 'paid' && d.cancelled) || (d.state === 'waiting' && d.cancelled));
   const unsorted = deals.filter((d) => d.state === 'open' && !d.cancelled);
-  const group = (title, list, empty) =>
-    `<h3 class="ads-h">${title}${list.length ? ` · ${list.length}` : ''}</h3>` + (list.length ? list.map(dealLine).join('') : `<div class="empty">${empty}</div>`);
+  const group = (key, title, list, empty) => {
+    const head = `${title}${list.length ? ` · ${list.length}` : ''}`;
+    return `<h3 class="ads-h">${list.some(pickable) ? `<label class="pick"><input type="checkbox" data-pick-all="${key}" aria-label="Выбрать все">${head}</label>` : head}</h3>` +
+      (list.length ? list.map((d) => dealLine(d, key)).join('') : `<div class="empty">${empty}</div>`);
+  };
   const unknown = S.ads.unknown ? `<div class="ads-sum"><span>без суммы: ${S.ads.unknown} — CPM ждёт просмотров или ПДП подсчёта, в долги пока не входят</span></div>` : '';
   $('#ads').innerHTML =
-    group('Ждём оплату', waiting, 'Никто никому не должен.') + unknown +
-    (unsorted.length ? group('Не разобраны', unsorted, '') : '');
+    group('waiting', 'Ждём оплату', waiting, 'Никто никому не должен.') + unknown +
+    (unsorted.length ? group('unsorted', 'Не разобраны', unsorted, '') : '');
+}
+
+// Галочки групп и плашка снизу — по тому, что выбрано сейчас.
+function syncPick() {
+  for (const all of document.querySelectorAll('[data-pick-all]')) {
+    const boxes = [...document.querySelectorAll(`[data-pick][data-g="${all.dataset.pickAll}"]`)];
+    const n = boxes.filter((x) => x.checked).length;
+    all.checked = n > 0 && n === boxes.length;
+    all.indeterminate = n > 0 && n < boxes.length;
+  }
+  const list = deals.filter((d) => picked.has(d.ref));
+  $('#adsBar').hidden = !list.length;
+  if (!list.length) return;
+  const sum = (kind) => list.filter((d) => d.kind === kind && d.amount != null).reduce((s, d) => s + d.amount, 0);
+  const has = (kind) => list.some((d) => d.kind === kind);
+  const noSum = list.filter((d) => d.amount == null).length;
+  const money = [has('sale') ? `<span class="plus">+${rub(sum('sale'))}</span>` : '', has('buy') ? `<span class="minus">−${rub(sum('buy'))}</span>` : ''].filter(Boolean).join(' / ');
+  $('#adsPicked').innerHTML = `<b>Выбрано ${list.length}</b> · ${money}${noSum ? ` <span class="muted">· без суммы: ${noSum}</span>` : ''}`;
 }
 
 function openPay(ref) {
@@ -366,6 +399,29 @@ $('#ads').addEventListener('click', async (e) => {
     toast(isBarter ? (on ? 'Бартер — без денег' : 'Сделка снова не разобрана') : on ? 'Ждём оплату' : 'Сделка снова не разобрана');
   } catch (err) {
     toast(err.message);
+  }
+});
+$('#ads').addEventListener('change', (e) => {
+  const all = e.target.closest('[data-pick-all]');
+  if (all) for (const x of document.querySelectorAll(`[data-pick][data-g="${all.dataset.pickAll}"]`)) x.checked = all.checked;
+  else if (!e.target.closest('[data-pick]')) return;
+  picked = new Set([...document.querySelectorAll('[data-pick]:checked')].map((x) => x.dataset.pick));
+  syncPick();
+});
+$('#adsBar').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-bulk-clear]')) return renderAds();
+  const b = e.target.closest('[data-bulk]');
+  if (!b || !picked.size) return;
+  const buttons = $('#adsBar').querySelectorAll('button');
+  for (const x of buttons) x.disabled = true;
+  try {
+    const r = await api('/api/ad-deals/bulk', { method: 'POST', body: JSON.stringify({ refs: [...picked], action: b.dataset.bulk }) });
+    await load();
+    toast(`Отмечено: ${r.changed}${r.skipped ? `, пропущено: ${r.skipped}` : ''}`);
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    for (const x of buttons) x.disabled = false;
   }
 });
 $('#adsAll').addEventListener('click', () => {

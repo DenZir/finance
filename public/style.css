@@ -86,6 +86,14 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .ads-h { margin: 14px 0 2px; font-size: 13px; color: var(--muted); font-weight: 500; }
 .ads-h:first-child { margin-top: 0; }
 .deal .age { color: var(--warn); }
+.pick { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.pick input { margin: 0; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.pick-gap { display: inline-block; width: 24px; }
+/* плашка отметки списком: прилипает к низу экрана, пока карточка рекламы на виду */
+.ads-bar { position: sticky; bottom: 12px; z-index: 4; margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; background: var(--panel2); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.ads-bar-b { display: flex; flex-wrap: wrap; gap: 6px; }
+.ads-bar .btn { padding: 6px 10px; }
+.btn:disabled { opacity: .5; cursor: default; }
 
 .dlg { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }
 .dlg::backdrop { background: rgba(0,0,0,.6); }

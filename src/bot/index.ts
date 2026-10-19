@@ -4,19 +4,24 @@
  * чужой не узнал даже, что бот что-то умеет.
  *
  * Строка вроде «сервер 20 usdt» — черновик операции с кнопками; /balance —
- * остатки.
+ * остатки; /debts и напоминание раз в день — долги по рекламе.
  */
 import type { Db } from '../db/index.js';
 import type { RateFetcher } from '../rates.js';
+import { listDeals } from '../ads.js';
 import { describe, BotApiError, type BotApi, type Keyboard, type TgCallbackQuery, type TgMessage, type TgUpdate } from './api.js';
 import { QuickEntry, type Outcome } from './draft.js';
 import { balanceText } from './balance.js';
+import { debtsText, lastReminderDay, markReminderDay, reminderDue } from './debts.js';
+import { mskDayStart, mskIso } from './text.js';
 
 export interface BotDeps {
   db: Db;
   api: BotApi;
   ownerIds: readonly string[];
   fetchRate: RateFetcher;
+  /** адрес страницы для кнопки «Открыть «Деньги»»; null — без кнопки */
+  publicUrl?: string | null;
   now?: () => number;
 }
 
@@ -33,6 +38,7 @@ export const HELP = [
   'Вид, проект, кошелёк и дату можно поправить кнопками до записи.',
   '',
   '/balance — остатки кошельков',
+  '/debts — кто кому должен по рекламе',
 ].join('\n');
 
 const NO_AMOUNT = `Не нашёл сумму. Например: «${EXAMPLES[0]}» или «${EXAMPLES[3]}».\n/help — подробнее`;
@@ -44,6 +50,8 @@ export function createBot(deps: BotDeps) {
   const isOwner = (id: number | undefined) => id !== undefined && deps.ownerIds.includes(String(id));
 
   const send = (chatId: number, text: string, keyboard?: Keyboard) => api.sendMessage(chatId, text, keyboard);
+  const openPage: Keyboard | undefined = deps.publicUrl ? [[{ text: 'Открыть «Деньги»', url: deps.publicUrl }]] : undefined;
+  const debtsNow = () => debtsText(listDeals(db), mskIso(now()));
 
   async function command(chatId: number, cmd: string): Promise<void> {
     switch (cmd) {
@@ -54,6 +62,11 @@ export function createBot(deps: BotDeps) {
       case 'balance':
         await send(chatId, await balanceText(db, fetchRate, now()));
         return;
+      case 'debts': {
+        const text = debtsNow();
+        await send(chatId, text ?? 'Никто никому не должен.', text ? openPage : undefined);
+        return;
+      }
       default:
         await send(chatId, NO_AMOUNT);
     }
@@ -93,6 +106,30 @@ export function createBot(deps: BotDeps) {
     async handleUpdate(u: TgUpdate): Promise<void> {
       if (u.message) await onMessage(u.message);
       else if (u.callback_query) await onCallback(u.callback_query);
+    },
+
+    /**
+     * Напоминание о долгах рекламы — раз в день, в hour по Москве. Зовётся раз в
+     * минуту; true — напоминание отправлено.
+     */
+    async remind(hour: number): Promise<boolean> {
+      const t = now();
+      if (!reminderDue(t, hour, lastReminderDay(db))) return false;
+      // День отмечается до отправки и когда долгов нет: иначе сделка, отмеченная
+      // «Ждём оплату» в 15:00, дала бы второе напоминание в 15:01.
+      markReminderDay(db, mskDayStart(t));
+      const text = debtsNow();
+      if (!text) return false;
+      for (const owner of deps.ownerIds) {
+        try {
+          await api.sendMessage(owner, text, openPage);
+        } catch (err) {
+          // бот не может написать первым: владелец должен один раз нажать /start
+          const hint = err instanceof BotApiError && (err.code === 403 || /chat not found/i.test(err.description)) ? ' — нажмите /start в боте' : '';
+          console.warn(`[bot] напоминание о долгах не ушло ${owner}: ${describe(err)}${hint}`);
+        }
+      }
+      return true;
     },
   };
 }

@@ -12,6 +12,10 @@ export interface Config {
   ownerIds: string[];
   /** опрашивать ли бота (getUpdates); на ноутбуке выключают, пока бота опрашивает сервер */
   botPolling: boolean;
+  /** час по Москве для напоминания о долгах рекламы; null — выключено */
+  reminderHour: number | null;
+  /** адрес страницы для кнопки в боте; null — без кнопки */
+  publicUrl: string | null;
   /** импорт оплат привата; null — выключен */
   botprivat: { url: string; key: string; since: number } | null;
   /** сделки рекламы из tg-analytics; null — выключены */
@@ -34,6 +38,16 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const polling = (env.BOT_POLLING ?? '').trim().toLowerCase();
   if (polling && !['0', 'off', '1', 'on'].includes(polling)) problems.push('BOT_POLLING — on или off');
   const botPolling = polling !== '0' && polling !== 'off';
+  const hour = (env.REMINDER_HOUR ?? '').trim().toLowerCase();
+  let reminderHour: number | null = 10;
+  if (hour === 'off') reminderHour = null;
+  else if (hour) {
+    reminderHour = /^\d{1,2}$/.test(hour) ? Number(hour) : -1;
+    if (reminderHour < 0 || reminderHour > 23) problems.push('REMINDER_HOUR — час по Москве от 0 до 23 или off');
+  }
+  // кнопка в Telegram открывается только по https
+  const publicUrl = (env.PUBLIC_URL ?? '').trim().replace(/\/+$/, '') || null;
+  if (publicUrl && !/^https:\/\/[^\s/]+(\/\S*)?$/.test(publicUrl)) problems.push('PUBLIC_URL — адрес страницы с https://, например https://dengi.routaterm.icu');
 
   // Импорт оплат привата и сделок рекламы: адрес сервиса, его ключ и с какой
   // даты брать. Дата обязательна — на неё же вносятся начальные остатки.
@@ -59,5 +73,5 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const analytics = source('ANALYTICS_URL', 'ANALYTICS_KEY', 'tg-analytics, например http://127.0.0.1:3000', 'его FINANCE_KEY');
 
   if (problems.length) throw new Error(`Настройки не заполнены:\n- ${problems.join('\n- ')}`);
-  return { port, dbPath: env.DB_PATH || './data/finance.db', botToken, botUsername, ownerIds, botPolling, botprivat, analytics };
+  return { port, dbPath: env.DB_PATH || './data/finance.db', botToken, botUsername, ownerIds, botPolling, reminderHour, publicUrl, botprivat, analytics };
 }

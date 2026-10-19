@@ -1,0 +1,107 @@
+/**
+ * Схема учёта.
+ *
+ * Суммы — целые числа в миллионных долях единицы валюты («микро»): копейки
+ * рубля и шесть знаков USDT/TRX ложатся без потерь, а плавающая точка в деньгах
+ * копит ошибку округления на каждой операции.
+ *
+ * Операция — что произошло (доход, расход, перевод, выплата партнёру). Проводки
+ * — как от этого изменились кошельки: у перевода их две, у дохода одна. Баланс
+ * кошелька — сумма его проводок, своего поля «остаток» нет, чтобы ему не с чем
+ * было разойтись.
+ */
+export const MIGRATIONS: readonly string[] = [
+  `
+  CREATE TABLE wallets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    currency   TEXT    NOT NULL,              -- RUB, USDT, TON, TRX…
+    kind       TEXT    NOT NULL,              -- provider | crypto | card | cash
+    fee_pct    REAL    NOT NULL DEFAULT 0,    -- комиссия платёжки с приёма, %
+    archived   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
+  -- Проект — чьи это деньги. У проекта с партнёром его доля от дохода и
+  -- расходов: VPN пополам (владелец, 2026-10-19).
+  CREATE TABLE projects (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    partner_pct REAL    NOT NULL DEFAULT 0,
+    archived    INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Вид дохода или расхода: приватка, реклама — посты, сторисы, заявки…
+  CREATE TABLE categories (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind     TEXT    NOT NULL,                -- income | expense
+    name     TEXT    NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE operations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT    NOT NULL,             -- income | expense | transfer | payout
+    at          INTEGER NOT NULL,             -- когда, UTC мс
+    project_id  INTEGER REFERENCES projects(id),
+    category_id INTEGER REFERENCES categories(id),
+    note        TEXT    NOT NULL DEFAULT '',
+    -- В рублях на момент операции: доход до комиссии / сумма расхода / сколько
+    -- ушло при переводе. Отчёты складывают рубли, а не разные валюты.
+    gross_rub   INTEGER NOT NULL DEFAULT 0,
+    -- Комиссия в рублях: платёжки с приёма, потери при выводе и обмене.
+    fee_rub     INTEGER NOT NULL DEFAULT 0,
+    -- Откуда взялась: manual — внесена руками; иначе автоимпорт, и source_ref —
+    -- номер в источнике, чтобы второй импорт не задвоил её.
+    source      TEXT    NOT NULL DEFAULT 'manual',
+    source_ref  TEXT,
+    created_at  INTEGER NOT NULL,
+    UNIQUE (source, source_ref)
+  );
+  CREATE INDEX operations_at ON operations(at);
+
+  CREATE TABLE entries (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    op_id     INTEGER NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+    wallet_id INTEGER NOT NULL REFERENCES wallets(id),
+    amount    INTEGER NOT NULL,               -- микро в валюте кошелька, со знаком
+    rub       INTEGER NOT NULL                -- то же в рублях-микро на момент операции
+  );
+  CREATE INDEX entries_wallet ON entries(wallet_id);
+  CREATE INDEX entries_op ON entries(op_id);
+
+  -- Последний известный курс валюты к рублю: для оценки остатков и для
+  -- операций, где курс не вписали руками.
+  CREATE TABLE rates (
+    currency TEXT PRIMARY KEY,
+    rub      REAL    NOT NULL,
+    at       INTEGER NOT NULL
+  );
+
+  CREATE TABLE sessions (
+    token      TEXT PRIMARY KEY,
+    tg_id      TEXT    NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+
+  INSERT INTO projects (name, partner_pct) VALUES
+    ('Приватка MARIN', 0), ('Реклама', 0), ('VPN', 50), ('Прочее', 0);
+
+  INSERT INTO categories (kind, name) VALUES
+    ('income', 'Приватка'),
+    ('income', 'Реклама — посты'),
+    ('income', 'Реклама — сторисы'),
+    ('income', 'Заявки с приветки'),
+    ('income', 'Партнёрская программа'),
+    ('income', 'VPN'),
+    ('income', 'Прочее'),
+    ('expense', 'Закуп рекламы'),
+    ('expense', 'VPN — серверы и сервисы'),
+    ('expense', 'Сервисы и подписки'),
+    ('expense', 'Прочее');
+
+  INSERT INTO wallets (name, currency, kind, fee_pct, created_at) VALUES
+    ('Platega', 'RUB', 'provider', 14, CAST(strftime('%s','now') AS INTEGER) * 1000),
+    ('CryptoBot', 'USDT', 'provider', 3, CAST(strftime('%s','now') AS INTEGER) * 1000);
+  `,
+];

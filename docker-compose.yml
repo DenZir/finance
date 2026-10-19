@@ -1,0 +1,14 @@
+services:
+  finance:
+    build: .
+    container_name: finance
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Как у остальных сервисов: сеть хоста, Caddy ведёт dengi.routaterm.icu на
+    # 127.0.0.1:${PORT}. Порт слушается на всех интерфейсах — держите его
+    # закрытым в фаерволе.
+    network_mode: host
+    volumes:
+      # База — в ./data (DB_PATH=./data/finance.db). Папку Docker создаст сам.
+      - ./data:/app/data

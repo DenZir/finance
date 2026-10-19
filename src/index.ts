@@ -4,6 +4,8 @@ import { coingecko } from './rates.js';
 import { createApp } from './server.js';
 import { httpOrders, importBotprivat } from './import/botprivat.js';
 import { httpDeals, syncDeals } from './ads.js';
+import { botApi, httpBotCall, startPolling } from './bot/api.js';
+import { createBot } from './bot/index.js';
 
 const config = readConfig();
 const db = openDb(config.dbPath);
@@ -58,8 +60,21 @@ if (an) {
   console.log(`[ads] сделки рекламы из ${an.url}`);
 }
 
+// Бот: быстрая запись операций и /balance. Сбой бота сервер и импорт не роняет —
+// опрос сам ловит ошибки и ждёт.
+let poller: { stop: () => void } | null = null;
+if (config.botPolling) {
+  const api = botApi(httpBotCall(config.botToken));
+  const bot = createBot({ db, api, ownerIds: config.ownerIds, fetchRate: coingecko });
+  poller = startPolling(api, bot.handleUpdate);
+  console.log(`[bot] опрашиваю @${config.botUsername}`);
+} else {
+  console.log('[bot] опрос бота выключен (BOT_POLLING=off)');
+}
+
 const stop = (signal: string) => {
   console.log(`[finance] ${signal}, останавливаюсь`);
+  poller?.stop();
   server.close(() => {
     db.close();
     process.exit(0);

@@ -10,6 +10,8 @@ export interface Config {
   botToken: string;
   botUsername: string;
   ownerIds: string[];
+  /** опрашивать ли бота (getUpdates); на ноутбуке выключают, пока бота опрашивает сервер */
+  botPolling: boolean;
   /** импорт оплат привата; null — выключен */
   botprivat: { url: string; key: string; since: number } | null;
   /** сделки рекламы из tg-analytics; null — выключены */
@@ -27,6 +29,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!/^\w{5,}$/.test(botUsername)) problems.push('BOT_USERNAME — имя бота без @');
   const ownerIds = (env.OWNER_TG_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!ownerIds.length || ownerIds.some((id) => !/^\d+$/.test(id))) problems.push('OWNER_TG_IDS — Telegram ID владельца, цифрами');
+  // Бота опрашивает один процесс: второй получает 409. Dev-сервер на ноутбуке с
+  // тем же токеном запускают с BOT_POLLING=off, пока бот живёт на сервере.
+  const polling = (env.BOT_POLLING ?? '').trim().toLowerCase();
+  if (polling && !['0', 'off', '1', 'on'].includes(polling)) problems.push('BOT_POLLING — on или off');
+  const botPolling = polling !== '0' && polling !== 'off';
 
   // Импорт оплат привата и сделок рекламы: адрес сервиса, его ключ и с какой
   // даты брать. Дата обязательна — на неё же вносятся начальные остатки.
@@ -52,5 +59,5 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const analytics = source('ANALYTICS_URL', 'ANALYTICS_KEY', 'tg-analytics, например http://127.0.0.1:3000', 'его FINANCE_KEY');
 
   if (problems.length) throw new Error(`Настройки не заполнены:\n- ${problems.join('\n- ')}`);
-  return { port, dbPath: env.DB_PATH || './data/finance.db', botToken, botUsername, ownerIds, botprivat, analytics };
+  return { port, dbPath: env.DB_PATH || './data/finance.db', botToken, botUsername, ownerIds, botPolling, botprivat, analytics };
 }

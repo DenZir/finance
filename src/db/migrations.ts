@@ -122,4 +122,25 @@ export const MIGRATIONS: readonly string[] = [
     cursor INTEGER NOT NULL
   );
   `,
+  `
+  -- Сделки рекламы из tg-analytics: закупы и продажи, которые ждут отметки.
+  -- «Оплачено» — это операция с source = 'ads' и source_ref = ref, отдельного
+  -- флага нет: удалил операцию — сделка снова ждёт. «Бартер» — денег не было,
+  -- в выручку и остатки сделка не идёт. Остальное приходит из аналитики и
+  -- перезаписывается каждой сверкой: сумма у CPM появляется позже, сделку
+  -- могут перенести или отменить.
+  CREATE TABLE ad_deals (
+    ref       TEXT PRIMARY KEY,            -- buy:12 / sale:5, как в аналитике
+    kind      TEXT    NOT NULL,            -- buy | sale
+    date      TEXT    NOT NULL,            -- ГГГГ-ММ-ДД, день места
+    slot      TEXT    NOT NULL,            -- stories — сторис, остальное — посты
+    contact   TEXT    NOT NULL DEFAULT '',
+    channels  TEXT    NOT NULL DEFAULT '', -- через запятую
+    amount    INTEGER,                     -- ₽-микро; null — сумма ещё не известна
+    cancelled INTEGER NOT NULL DEFAULT 0,  -- отменена или удалена в аналитике
+    barter_at INTEGER,
+    synced_at INTEGER NOT NULL
+  );
+  CREATE INDEX ad_deals_date ON ad_deals(date);
+  `,
 ];

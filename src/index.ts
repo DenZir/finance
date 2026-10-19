@@ -3,6 +3,7 @@ import { openDb } from './db/index.js';
 import { coingecko } from './rates.js';
 import { createApp } from './server.js';
 import { httpOrders, importBotprivat } from './import/botprivat.js';
+import { httpDeals, syncDeals } from './ads.js';
 
 const config = readConfig();
 const db = openDb(config.dbPath);
@@ -33,6 +34,28 @@ if (bp) {
   setTimeout(pull, 10_000);
   setInterval(pull, 5 * 60_000);
   console.log(`[import] оплаты привата с ${new Date(bp.since + 3 * 3600_000).toISOString().slice(0, 10)} (МСК) из ${bp.url}`);
+}
+
+// Сделки рекламы — так же раз в 5 минут: у CPM сумма появляется, когда
+// просмотры зафиксированы, сделки переносят и отменяют.
+const an = config.analytics;
+if (an) {
+  let running = false;
+  const pull = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const r = await syncDeals(db, { fetchDeals: httpDeals(an.url, an.key), since: an.since });
+      if (r.added) console.log(`[ads] новых сделок рекламы: ${r.added}`);
+    } catch (err) {
+      console.warn('[ads] tg-analytics недоступна:', err instanceof Error ? err.message : err);
+    } finally {
+      running = false;
+    }
+  };
+  setTimeout(pull, 15_000);
+  setInterval(pull, 5 * 60_000);
+  console.log(`[ads] сделки рекламы из ${an.url}`);
 }
 
 const stop = (signal: string) => {

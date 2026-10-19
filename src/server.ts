@@ -17,6 +17,7 @@ import {
   type WalletKind,
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
+import { adDebts, listDeals, payDeal, setBarter } from './ads.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -101,6 +102,7 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
         categories: listCategories(db),
         partners: partnerDebts(db),
         totals: { onProviders: sum((w) => w.kind === 'provider'), onWallets: sum((w) => w.kind !== 'provider') },
+        ads: adDebts(db),
       });
     } catch (err) {
       next(err);
@@ -168,6 +170,30 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
 
   app.delete('/api/operations/:id', (req, res) => {
     res.json({ deleted: deleteOperation(db, Number(req.params.id)) });
+  });
+
+  // --- реклама ---------------------------------------------------------------
+  app.get('/api/ad-deals', (_req, res) => {
+    res.json(listDeals(db));
+  });
+
+  app.post('/api/ad-deals/:ref/pay', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
+      const id = payDeal(db, String(req.params.ref), {
+        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+        feePct: b.feePct === undefined || b.feePct === '' ? undefined : parsePct(b.feePct),
+      }, now());
+      res.json({ id });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/ad-deals/:ref/barter', (req, res) => {
+    setBarter(db, String(req.params.ref), req.body?.on !== false, now());
+    res.json({ ok: true });
   });
 
   app.post('/api/wallets', (req, res) => {

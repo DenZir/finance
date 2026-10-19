@@ -160,6 +160,9 @@ test('устаревший черновик, «Отмена», мусор вме
   assert.equal(s.last('editMessageText').params.reply_markup, undefined, 'кнопки сняты');
   assert.equal(s.ops().length, 0);
 
+  await s.bot.handleUpdate(message(OWNER, `20 usdt ${'очень длинная заметка '.repeat(100)}`));
+  assert.ok(s.last('sendMessage').params.text.length < 1000, 'заметка обрезана до 500 знаков — черновик влезает в сообщение');
+
   await s.bot.handleUpdate(message(OWNER, 'привет'));
   assert.match(s.last('sendMessage').params.text, /Не нашёл сумму/);
   await s.bot.handleUpdate(message(OWNER, '/start'));

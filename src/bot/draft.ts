@@ -149,7 +149,8 @@ export class QuickEntry {
       ...this.guess(parsed.kind, parsed.note),
       day: mskDayStart(t),
       yesterday: false,
-      note: parsed.note,
+      // как на странице — 500 знаков: длиннее и черновик не влезет в сообщение Telegram
+      note: parsed.note.slice(0, 500),
       createdAt: t,
       calc: null,
       problem: null,

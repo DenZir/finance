@@ -32,7 +32,7 @@ button, input, select { font: inherit; color: inherit; }
 .btn.danger { color: var(--bad); }
 .icon { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 18px; line-height: 1; }
 
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; min-width: 0; }
 .tile b { display: block; font: 600 22px/1.2 var(--mono); margin: 2px 0; overflow-wrap: anywhere; }
 .tile span { color: var(--muted); font-size: 12.5px; }
@@ -70,6 +70,20 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .op .del:hover { color: var(--bad); }
 .empty { color: var(--muted); padding: 12px 2px; }
 
+.deal { display: grid; grid-template-columns: 72px 1fr auto auto; gap: 10px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.deal:last-child { border-bottom: 0; }
+.deal .when { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+.deal .what { min-width: 0; }
+.deal .what b { font-weight: 500; }
+.deal .what small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.deal .sum { text-align: right; font-family: var(--mono); white-space: nowrap; }
+.deal .acts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+.deal .acts .btn { padding: 6px 10px; }
+.deal.done { opacity: .6; }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.ads-sum { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin: -4px 0 8px; }
+.pay-deal { margin: -4px 0 12px; font-size: 13px; }
+
 .dlg { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }
 .dlg::backdrop { background: rgba(0,0,0,.6); }
 .dlg form { padding: 16px; }
@@ -96,6 +110,9 @@ tr.total td { font-weight: 600; border-bottom: 0; }
   .month span { min-width: 104px; font-size: 13px; }
   .op { grid-template-columns: 1fr auto auto; }
   .op .when { grid-column: 1 / -1; }
+  .deal { grid-template-columns: 1fr auto; }
+  .deal .when { grid-column: 1 / -1; }
+  .deal .acts { grid-column: 1 / -1; justify-content: flex-start; }
   .fields { grid-template-columns: 1fr; }
   .seg button { font-size: 12.5px; }
 }

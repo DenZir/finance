@@ -32,6 +32,11 @@
   <main class="wrap">
     <section class="tiles" id="tiles"></section>
 
+    <section class="card" id="adsCard" hidden>
+      <div class="card-h"><h2>Реклама</h2><button class="btn ghost" id="adsAll" type="button">Все сделки</button></div>
+      <div id="ads"></div>
+    </section>
+
     <section class="card">
       <div class="card-h"><h2>Кошельки</h2><button class="btn" id="addWallet" type="button">+ Кошелёк</button></div>
       <div id="wallets" class="wallets"></div>
@@ -63,6 +68,23 @@
     <p id="opHint" class="hint"></p>
     <p id="opError" class="err" hidden></p>
     <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<dialog id="payDlg" class="dlg">
+  <form id="payForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3 id="payTitle">Оплачено</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p id="payDeal" class="muted pay-deal"></p>
+    <div class="fields">
+      <label>Кошелёк<select name="walletId"></select></label>
+      <label>Дата<input type="date" name="date" required></label>
+      <label id="payAmountLabel">Сколько пришло<input name="amount" inputmode="decimal" required></label>
+      <label data-pay-rate>Курс к ₽<input name="rate" inputmode="decimal" placeholder="текущий"></label>
+      <label data-pay-fee>Комиссия, %<input name="feePct" inputmode="decimal" placeholder="0"></label>
+    </div>
+    <p id="payHint" class="hint"></p>
+    <p id="payError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Записать</button></div>
   </form>
 </dialog>
 

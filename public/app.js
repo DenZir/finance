@@ -10,6 +10,9 @@ const OP_LABEL = { income: 'Доход', expense: 'Расход', transfer: 'П�
 let S = null; // state
 let month = monthOf(Date.now());
 let opKind = 'income';
+let deals = [];
+let adsAll = false;
+let payRef = null;
 
 function monthOf(ms) {
   const d = new Date(ms + MSK);
@@ -80,8 +83,74 @@ function renderTiles(report) {
     (vpn
       ? tile(`Должен партнёру · ${esc(vpn.name)}`, rub(Math.max(vpn.owed, 0)), vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода и расходов`, vpn.owed > 0 ? 'warn' : '')
       : tile('Должен партнёру', '—', 'нет проектов с партнёром')) +
-    tile('Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad');
+    tile('Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad') +
+    tile('Нам должны', rub(S.ads.owedToUs), S.ads.owedToUsCount ? `продажи рекламы без оплаты: ${S.ads.owedToUsCount}` : 'по рекламе всё оплачено', S.ads.owedToUs ? 'warn' : '') +
+    tile('Мы должны', rub(S.ads.weOwe), S.ads.weOweCount ? `закупы без оплаты: ${S.ads.weOweCount}` : 'по закупам всё оплачено', S.ads.weOwe ? 'warn' : '');
 }
+
+// --- реклама ------------------------------------------------------------------
+const SLOT = { morning: 'утро', day: 'день', evening: 'вечер', night: 'ночь', stories: 'сторисы', n9: '9:00', n17: '17:00' };
+const dealDay = (date) => `${date.slice(8, 10)}.${date.slice(5, 7)}`;
+const dealTitle = (d) => `${d.kind === 'sale' ? 'Продажа' : 'Закуп'} · ${SLOT[d.slot] ?? esc(d.slot)}`;
+
+function dealLine(d) {
+  const sum = d.amount == null ? '<span class="muted">суммы ещё нет</span>' : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(d.amount)}</span>`;
+  let acts;
+  if (d.state === 'paid') acts = `<span class="chip">оплачено</span>${d.cancelled ? ' <span class="chip warn">отменена в аналитике</span>' : ''}`;
+  else if (d.state === 'barter') acts = `<span class="chip">бартер</span><button class="btn ghost" type="button" data-unbarter="${esc(d.ref)}">Вернуть</button>`;
+  else if (d.cancelled) acts = '<span class="chip">отменена</span>';
+  else acts = `<button class="btn primary" type="button" data-pay="${esc(d.ref)}">Оплачено</button><button class="btn" type="button" data-barter="${esc(d.ref)}">Бартер</button>`;
+  const done = d.state !== 'open' || d.cancelled;
+  return `<div class="deal${done ? ' done' : ''}"><span class="when">${dealDay(d.date)}</span>
+    <div class="what"><b>${dealTitle(d)}</b><small>${[esc(d.contact), esc(d.channels)].filter(Boolean).join(' · ')}</small></div>
+    <div class="sum">${sum}</div><div class="acts">${acts}</div></div>`;
+}
+
+function renderAds() {
+  $('#adsCard').hidden = !deals.length;
+  if (!deals.length) return;
+  $('#adsAll').textContent = adsAll ? 'Только ждущие' : 'Все сделки';
+  // ждут решения — по дате; оплаченная, но отменённая в аналитике тоже на виду
+  const shown = adsAll
+    ? [...deals].sort((a, b) => b.date.localeCompare(a.date))
+    : deals.filter((d) => (d.state === 'open' && !d.cancelled) || (d.state === 'paid' && d.cancelled));
+  const unknown = S.ads.unknown ? `<span>без суммы: ${S.ads.unknown} — CPM ждёт просмотров или ПДП подсчёта</span>` : '';
+  $('#ads').innerHTML =
+    (adsAll ? '' : `<div class="ads-sum"><span>ждут решения: ${shown.length}</span>${unknown}</div>`) +
+    (shown.length ? shown.map(dealLine).join('') : '<div class="empty">Все сделки разобраны — оплачены или бартер.</div>');
+}
+
+function openPay(ref) {
+  const d = deals.find((x) => x.ref === ref);
+  if (!d) return;
+  payRef = ref;
+  const f = $('#payForm');
+  f.reset();
+  $('#payError').hidden = true;
+  $('#payTitle').textContent = d.kind === 'sale' ? 'Продажа оплачена' : 'Закуп оплачен';
+  $('#payDeal').textContent = `${dealDay(d.date)} · ${dealTitle(d)} · ${[d.contact, d.channels].filter(Boolean).join(' · ')}${d.amount != null ? ` · ${rub(d.amount)}` : ''}`;
+  f.walletId.innerHTML = walletOpts();
+  f.date.value = todayIso();
+  $('#payAmountLabel').firstChild.textContent = d.kind === 'sale' ? 'Сколько пришло' : 'Сколько ушло';
+  f.querySelector('[data-pay-fee]').hidden = d.kind !== 'sale';
+  $('#payHint').textContent = d.kind === 'sale'
+    ? 'Доход «Реклама» на этот кошелёк. При взаимозачёте впишите, сколько пришло на самом деле.'
+    : 'Расход «Закуп рекламы» с этого кошелька.';
+  syncPay();
+  $('#payDlg').showModal();
+}
+
+// сумма сделки — в рублях; на кошелёк в другой валюте подставляем по курсу
+function syncPay() {
+  const f = $('#payForm');
+  const d = deals.find((x) => x.ref === payRef);
+  const w = S.wallets.find((x) => String(x.id) === f.walletId.value);
+  f.querySelector('[data-pay-rate]').hidden = !w || w.currency === 'RUB';
+  if (!d || d.amount == null || !w) return;
+  const v = w.currency === 'RUB' ? d.amount / MICRO : w.rate ? Math.round((d.amount / MICRO / w.rate) * 100) / 100 : '';
+  f.amount.value = v === '' ? '' : String(v).replace('.', ',');
+}
+
 
 function renderWallets() {
   const list = S.wallets.filter((w) => !w.archived);
@@ -132,19 +201,21 @@ function opLine(o) {
     sum = `<span class="${o.kind === 'income' ? 'plus' : 'minus'}">${o.kind === 'income' ? '+' : '−'}${rub(o.grossRub)}</span>`;
     sub = [wallet && esc(wallet.name), o.kind === 'income' && o.feeRub ? `комиссия ${rub(o.feeRub)}` : '', wallet && wallet.currency !== 'RUB' && a ? amt(Math.abs(a.amount), wallet.currency) : ''].filter(Boolean).join(' · ');
   }
-  const meta = [OP_LABEL[o.kind], o.projectId && o.kind !== 'payout' ? esc(nameOf(S.projects, o.projectId)) : '', esc(o.note), o.source === 'botprivat' ? 'авто · ботприват' : ''].filter(Boolean).join(' · ');
+  const meta = [OP_LABEL[o.kind], o.projectId && o.kind !== 'payout' ? esc(nameOf(S.projects, o.projectId)) : '', esc(o.note), o.source === 'botprivat' ? 'авто · ботприват' : o.source === 'ads' ? 'сделка рекламы' : ''].filter(Boolean).join(' · ');
   return `<div class="op"><span class="when">${day(o.at)}</span><div class="what"><b>${title}</b><small>${meta}</small></div><div class="sum">${sum}<small>${sub}</small></div><button class="del" type="button" data-del="${o.id}" aria-label="Удалить операцию">×</button></div>`;
 }
 
 async function load() {
-  const [state, report, ops] = await Promise.all([api('/api/state'), api(`/api/report?month=${month}`), api(`/api/operations?month=${month}`)]);
+  const [state, report, ops, ads] = await Promise.all([api('/api/state'), api(`/api/report?month=${month}`), api(`/api/operations?month=${month}`), api('/api/ad-deals')]);
   S = state;
+  deals = ads;
   $('#login').hidden = true;
   $('#app').hidden = false;
   if (location.search) history.replaceState(null, '', '/');
   const [y, m] = month.split('-').map(Number);
   $('#monthLabel').textContent = new Date(Date.UTC(y, m - 1, 15)).toLocaleString('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   renderTiles(report);
+  renderAds();
   renderWallets();
   renderReport(report);
   $('#ops').innerHTML = ops.length ? ops.map(opLine).join('') : '<div class="empty">За этот месяц операций нет.</div>';
@@ -252,6 +323,43 @@ $('#walletForm').addEventListener('submit', async (e) => {
   } catch (err) {
     $('#walletError').textContent = err.message;
     $('#walletError').hidden = false;
+  }
+});
+
+$('#ads').addEventListener('click', async (e) => {
+  const pay = e.target.closest('[data-pay]');
+  if (pay) return openPay(pay.dataset.pay);
+  const b = e.target.closest('[data-barter],[data-unbarter]');
+  if (!b) return;
+  const on = !!b.dataset.barter;
+  try {
+    await api(`/api/ad-deals/${encodeURIComponent(b.dataset.barter || b.dataset.unbarter)}/barter`, { method: 'POST', body: JSON.stringify({ on }) });
+    await load();
+    toast(on ? 'Бартер — без денег' : 'Сделка снова ждёт');
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('#adsAll').addEventListener('click', () => {
+  adsAll = !adsAll;
+  renderAds();
+});
+$('#payForm').addEventListener('change', (e) => {
+  if (e.target.name === 'walletId') syncPay();
+});
+$('#payForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const [y, m, d] = String(f.date || todayIso()).split('-').map(Number);
+  const at = Date.UTC(y, m - 1, d, 12) - MSK;
+  try {
+    await api(`/api/ad-deals/${encodeURIComponent(payRef)}/pay`, { method: 'POST', body: JSON.stringify({ ...f, at }) });
+    $('#payDlg').close();
+    await load();
+    toast('Записано');
+  } catch (err) {
+    $('#payError').textContent = err.message;
+    $('#payError').hidden = false;
   }
 });
 

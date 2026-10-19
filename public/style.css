@@ -57,6 +57,13 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .rep { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .rep h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
 .plus { color: var(--good); } .minus { color: var(--bad); }
+.seg.mini { grid-template-columns: repeat(2, auto); margin: 0; }
+.seg.mini button { padding: 4px 12px; }
+.scroll-x { overflow-x: auto; margin-bottom: 20px; }
+.year td:first-child, .year th:first-child { position: sticky; left: 0; background: var(--panel); white-space: nowrap; }
+.year tr[data-month] { cursor: pointer; }
+.year tr[data-month]:hover td { background: var(--panel2); }
+.link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; }
 
 .op { display: grid; grid-template-columns: 72px 1fr auto auto; gap: 10px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .op:last-child { border-bottom: 0; }

@@ -353,3 +353,31 @@ export function monthRange(month: string): { from: number; to: number } {
   const MSK = 3 * 3600_000;
   return { from: Date.UTC(y, mo - 1, 1) - MSK, to: Date.UTC(y, mo, 1) - MSK };
 }
+
+export type MonthTotals = Pick<MonthReport, 'totalIncome' | 'incomeFees' | 'transferFees' | 'totalExpense' | 'net'> & { month: string };
+
+export interface YearReport {
+  year: number;
+  /** январь…декабрь по Москве; месяцы без операций, в том числе будущие, — нули */
+  months: MonthTotals[];
+  /** весь год — по видам и проектам, как итоги месяца */
+  total: MonthReport;
+}
+
+/**
+ * Итоги года: каждый месяц — тем же monthReport, что и «Итоги месяца», а не
+ * разбивкой годовых операций, чтобы строка месяца в году совпадала с его
+ * собственной страницей до копейки. Всегда двенадцать месяцев: у текущего года
+ * будущие просто пустые.
+ */
+export function yearReport(db: Db, year: number): YearReport {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new MoneyInputError('год — от 2000 до 2100');
+  const months = Array.from({ length: 12 }, (_, i): MonthTotals => {
+    const month = `${year}-${String(i + 1).padStart(2, '0')}`;
+    const { from, to } = monthRange(month);
+    const { totalIncome, incomeFees, transferFees, totalExpense, net } = monthReport(db, from, to);
+    return { month, totalIncome, incomeFees, transferFees, totalExpense, net };
+  });
+  const total = monthReport(db, monthRange(`${year}-01`).from, monthRange(`${year}-12`).to);
+  return { year, months, total };
+}

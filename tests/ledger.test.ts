@@ -9,7 +9,7 @@ import { openDb } from '../src/db/index.js';
 import { MICRO, MoneyInputError, parseAmount } from '../src/money.js';
 import {
   addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, listCategories,
-  listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts,
+  listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, yearReport,
 } from '../src/ledger.js';
 
 const rub = (n: number) => Math.round(n * MICRO);
@@ -148,4 +148,49 @@ test('операция задним числом не сдвигает впис�
   const adj = listOperations(db, AT - 1, AT + 1).find((o) => o.kind === 'adjust')!;
   deleteOperation(db, adj.id);
   assert.equal(balances(db).get(platega.id), rub(1500));
+});
+
+/**
+ * Итоги года: месяц — по Москве, как и в «Итогах месяца». Оплата 31.01 в 23:30
+ * МСК — январская, в 00:30 1 февраля — уже февральская, хотя в UTC обе 31.01;
+ * ночь на 1 января так же делит годы.
+ */
+test('итоги года: месяцы по Москве, двенадцать строк складываются в год; год вне 2000–2100 — отказ', () => {
+  const { db, wallet, project, category } = setup();
+  const platega = wallet('Platega').id, cryptobot = wallet('CryptoBot').id;
+  const msk = (y: number, mo: number, d: number, h: number, mi = 0) => Date.UTC(y, mo - 1, d, h, mi) - 3 * 3600_000;
+  const income = (at: number, amount: number) =>
+    addIncome(db, { at, walletId: platega, amount: rub(amount), rate: 1, projectId: project('Приватка MARIN').id, categoryId: category('Приватка').id });
+  income(msk(2025, 12, 31, 23, 30), 5000); // прошлый год
+  income(msk(2026, 1, 1, 0, 30), 1000);
+  income(msk(2026, 1, 31, 23, 30), 2000);
+  income(msk(2026, 2, 1, 0, 30), 500);
+  addExpense(db, { at: msk(2026, 2, 10, 12), walletId: platega, amount: rub(300), rate: 1, categoryId: category('Сервисы и подписки').id });
+  addTransfer(db, { at: msk(2026, 6, 5, 12), fromWalletId: platega, amount: rub(1000), fromRate: 1, toWalletId: cryptobot, toAmount: rub(10), toRate: 97 });
+  income(msk(2026, 12, 31, 23, 30), 4000);
+  income(msk(2027, 1, 1, 0, 30), 7000); // следующий год
+
+  const y = yearReport(db, 2026);
+  assert.deepEqual(y.months.map((m) => m.month), ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12']);
+  const at = (month: string) => y.months.find((m) => m.month === month)!;
+  assert.equal(at('2026-01').totalIncome, rub(3000));
+  assert.equal(at('2026-01').incomeFees, rub(420), '14 % Platega');
+  assert.deepEqual(at('2026-02'), { month: '2026-02', totalIncome: rub(500), incomeFees: rub(70), transferFees: 0, totalExpense: rub(300), net: rub(130) });
+  assert.equal(at('2026-06').transferFees, rub(30));
+  assert.equal(at('2026-06').net, rub(-30), 'месяц только с выводом — в минусе на потерю');
+  assert.equal(at('2026-12').totalIncome, rub(4000));
+  assert.deepEqual(at('2026-03'), { month: '2026-03', totalIncome: 0, incomeFees: 0, transferFees: 0, totalExpense: 0, net: 0 });
+
+  // строка месяца — ровно его «Итоги месяца», а двенадцать строк — весь год
+  const feb = monthReport(db, ...Object.values(monthRange('2026-02')) as [number, number]);
+  assert.equal(at('2026-02').net, feb.net);
+  for (const k of ['totalIncome', 'incomeFees', 'transferFees', 'totalExpense', 'net'] as const) {
+    assert.equal(y.months.reduce((s, m) => s + m[k], 0), y.total[k], k);
+  }
+  assert.equal(y.total.totalIncome, rub(7500), 'ни 31.12.2025, ни 01.01.2027 в 2026 не попали');
+  assert.deepEqual(y.total.income.map((r) => [r.categoryId, r.projectId, r.rub]), [[category('Приватка').id, project('Приватка MARIN').id, rub(7500)]]);
+  assert.deepEqual(y.total.expense.map((r) => r.rub), [rub(300)]);
+  assert.equal(yearReport(db, 2025).total.totalIncome, rub(5000));
+
+  for (const bad of [1999, 2101, 2026.5, Number.NaN, 0]) assert.throws(() => yearReport(db, bad), MoneyInputError, String(bad));
 });

@@ -52,7 +52,11 @@
     </section>
 
     <section class="card">
-      <div class="card-h"><h2>Итоги месяца</h2></div>
+      <div class="card-h"><h2 id="reportTitle">Итоги месяца</h2>
+        <div class="seg mini" id="period" role="group" aria-label="Период">
+          <button type="button" data-period="month" class="on" aria-pressed="true">Месяц</button><button type="button" data-period="year" aria-pressed="false">Год</button>
+        </div>
+      </div>
       <div id="report"></div>
     </section>
 

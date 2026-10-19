@@ -12,7 +12,7 @@ import { SESSION_COOKIE, SESSION_MS, checkTelegramLogin, createSession, dropSess
 import { MoneyInputError, parseAmount, parsePct, parseRate } from './money.js';
 import {
   WALLET_KINDS, addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
-  listCategories, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet,
+  listCategories, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet, yearReport,
   type Wallet,
   type WalletKind,
 } from './ledger.js';
@@ -117,6 +117,10 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   app.get('/api/report', (req, res) => {
     const { from, to } = monthRange(String(req.query.month ?? ''));
     res.json(monthReport(db, from, to));
+  });
+
+  app.get('/api/year', (req, res) => {
+    res.json(yearReport(db, Number(req.query.year)));
   });
 
   app.post('/api/operations', async (req, res, next) => {

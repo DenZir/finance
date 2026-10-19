@@ -1,4 +1,4 @@
-// Страница учёта: плашки, кошельки, итоги месяца, операции.
+// Страница учёта: плашки, кошельки, итоги месяца или года, операции.
 // Суммы приходят в «микро» (миллионных долях единицы) — переводим только при показе.
 
 const $ = (s) => document.querySelector(s);
@@ -9,6 +9,9 @@ const OP_LABEL = { income: 'Доход', expense: 'Расход', transfer: 'П�
 
 let S = null; // state
 let month = monthOf(Date.now());
+// «Год»: переключатель вверху листает годы, «Итоги» — по месяцам года, операции скрыты
+let period = 'month';
+let year = Number(month.slice(0, 4));
 let opKind = 'income';
 let deals = [];
 let adsAll = false;
@@ -84,7 +87,7 @@ function renderTiles(report) {
     (vpn
       ? tile(`Должен партнёру · ${esc(vpn.name)}`, rub(Math.max(vpn.owed, 0)), vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода и расходов`, vpn.owed > 0 ? 'warn' : '')
       : tile('Должен партнёру', '—', 'нет проектов с партнёром')) +
-    tile('Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad') +
+    tile(period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad') +
     tile('Нам должны', rub(S.ads.owedToUs), S.ads.owedToUsCount ? `ждём оплату за продажи: ${S.ads.owedToUsCount}` : 'никто не должен', S.ads.owedToUs ? 'warn' : '') +
     tile('Мы должны', rub(S.ads.weOwe), S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны', S.ads.weOwe ? 'warn' : '');
 }
@@ -226,12 +229,12 @@ function renderWallets() {
     : '<div class="empty">Кошельков нет — добавьте первый.</div>';
 }
 
-function renderReport(r) {
+function reportHtml(r) {
   const rows = (list, kind) =>
     list.length
       ? list.map((x) => `<tr><td>${esc(nameOf(S.categories, x.categoryId))}<br><small class="muted">${esc(nameOf(S.projects, x.projectId))}</small></td><td class="num ${kind}">${rub(x.rub)}</td></tr>`).join('')
       : '<tr><td class="muted" colspan="2">нет</td></tr>';
-  $('#report').innerHTML = `<div class="rep">
+  return `<div class="rep">
     <div><h3>Доходы</h3><table>${rows(r.income, 'plus')}<tr class="total"><td>Всего</td><td class="num">${rub(r.totalIncome)}</td></tr></table></div>
     <div><h3>Комиссии и расходы</h3><table>
       <tr><td>Комиссии платёжек</td><td class="num minus">${rub(r.incomeFees)}</td></tr>
@@ -239,6 +242,25 @@ function renderReport(r) {
       ${rows(r.expense, 'minus')}
       <tr class="total"><td>Чистыми</td><td class="num ${r.net >= 0 ? 'plus' : 'minus'}">${rub(r.net)}</td></tr>
     </table></div></div>`;
+}
+
+const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+// Год: строка на месяц (нажать — открыть месяц), итог, ниже — весь год по видам.
+// Таблица шире телефона и прокручивается внутри карточки, а не вся страница.
+function yearHtml(y) {
+  const cell = (v) => (v ? `<td class="num">${rub(v)}</td>` : '<td class="num muted">—</td>');
+  const empty = (m) => !m.totalIncome && !m.incomeFees && !m.transferFees && !m.totalExpense;
+  const cells = (m) =>
+    cell(m.totalIncome) + cell(m.incomeFees) + cell(m.transferFees) + cell(m.totalExpense) +
+    (empty(m) ? '<td class="num muted">—</td>' : `<td class="num ${m.net >= 0 ? 'plus' : 'minus'}">${rub(m.net)}</td>`);
+  const rows = y.months
+    .map((m, i) => `<tr data-month="${m.month}" title="Открыть месяц"><td>${MONTHS[i]}</td>${cells(m)}</tr>`)
+    .join('');
+  return `<div class="scroll-x"><table class="year">
+    <thead><tr><th>Месяц</th><th class="num">Доход</th><th class="num">Комиссии</th><th class="num">Потери при выводе</th><th class="num">Расходы</th><th class="num">Чистыми</th></tr></thead>
+    <tbody>${rows}<tr class="total"><td>За год</td>${cells(y.total)}</tr></tbody>
+  </table></div>${reportHtml(y.total)}`;
 }
 
 function opLine(o) {
@@ -265,19 +287,42 @@ function opLine(o) {
 }
 
 async function load() {
-  const [state, report, ops, ads] = await Promise.all([api('/api/state'), api(`/api/report?month=${month}`), api(`/api/operations?month=${month}`), api('/api/ad-deals')]);
+  const byYear = period === 'year';
+  const [state, report, ops, ads] = await Promise.all([
+    api('/api/state'),
+    byYear ? api(`/api/year?year=${year}`) : api(`/api/report?month=${month}`),
+    byYear ? null : api(`/api/operations?month=${month}`),
+    api('/api/ad-deals'),
+  ]);
   S = state;
   deals = ads;
   $('#login').hidden = true;
   $('#app').hidden = false;
   if (location.search) history.replaceState(null, '', '/');
   const [y, m] = month.split('-').map(Number);
-  $('#monthLabel').textContent = new Date(Date.UTC(y, m - 1, 15)).toLocaleString('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  renderTiles(report);
+  $('#monthLabel').textContent = byYear ? String(year) : new Date(Date.UTC(y, m - 1, 15)).toLocaleString('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  $('#prevMonth').setAttribute('aria-label', byYear ? 'Прошлый год' : 'Прошлый месяц');
+  $('#nextMonth').setAttribute('aria-label', byYear ? 'Следующий год' : 'Следующий месяц');
+  for (const b of $('#period').children) {
+    b.classList.toggle('on', b.dataset.period === period);
+    b.setAttribute('aria-pressed', String(b.dataset.period === period));
+  }
+  $('#reportTitle').textContent = byYear ? 'Итоги года' : 'Итоги месяца';
+  renderTiles(byYear ? report.total : report);
   renderAds();
   renderWallets();
-  renderReport(report);
-  $('#ops').innerHTML = ops.length ? ops.map(opLine).join('') : '<div class="empty">За этот месяц операций нет.</div>';
+  $('#report').innerHTML = byYear ? yearHtml(report) : reportHtml(report);
+  $('#ops').innerHTML = byYear
+    ? '<div class="empty">Операции — в режиме <button class="link" type="button" data-period="month">«Месяц»</button>.</div>'
+    : ops.length ? ops.map(opLine).join('') : '<div class="empty">За этот месяц операций нет.</div>';
+}
+
+// Месяц ↔ год. Из года в месяц — тот же месяц выбранного года, или тот, что нажали в таблице.
+function setPeriod(p, m) {
+  if (p === 'year') year = Number(month.slice(0, 4));
+  else month = m ?? `${year}-${month.slice(5)}`;
+  period = p;
+  load().catch((e) => toast(e.message));
 }
 
 // --- форма операции ---------------------------------------------------------
@@ -364,6 +409,7 @@ $('#opForm').addEventListener('submit', async (e) => {
     await api('/api/operations', { method: 'POST', body: JSON.stringify({ ...f, kind: opKind, at }) });
     $('#opDlg').close();
     month = monthOf(at);
+    year = Number(month.slice(0, 4));
     await load();
     toast('Записано');
   } catch (err) {
@@ -448,6 +494,7 @@ $('#payForm').addEventListener('submit', async (e) => {
 });
 
 $('#ops').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-period]')) return setPeriod('month');
   const b = e.target.closest('[data-del]');
   if (!b || !confirm('Удалить операцию? Балансы и отчёт пересчитаются.')) return;
   try {
@@ -467,8 +514,22 @@ $('#addWallet').addEventListener('click', () => {
   $('#walletError').hidden = true;
   $('#walletDlg').showModal();
 });
-$('#prevMonth').addEventListener('click', () => { month = shiftMonth(month, -1); load().catch((e) => toast(e.message)); });
-$('#nextMonth').addEventListener('click', () => { month = shiftMonth(month, 1); load().catch((e) => toast(e.message)); });
+// в режиме «Год» стрелки листают годы; вне 2000–2100 сервер год не считает
+function step(delta) {
+  if (period === 'year') year = Math.min(2100, Math.max(2000, year + delta));
+  else month = shiftMonth(month, delta);
+  load().catch((e) => toast(e.message));
+}
+$('#prevMonth').addEventListener('click', () => step(-1));
+$('#nextMonth').addEventListener('click', () => step(1));
+$('#period').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-period]');
+  if (b && b.dataset.period !== period) setPeriod(b.dataset.period);
+});
+$('#report').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-month]');
+  if (tr) setPeriod('month', tr.dataset.month);
+});
 $('#logout').addEventListener('click', async () => {
   await fetch('/auth/logout', { method: 'POST' });
   location.href = '/';

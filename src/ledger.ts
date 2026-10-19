@@ -141,15 +141,23 @@ export function recomputeAdjustments(db: Db): void {
  */
 export function addIncome(
   db: Db,
-  input: OpBase & { walletId: number; amount: number; feePct?: number; rate: number; categoryId?: number | null },
+  input: OpBase & {
+    walletId: number;
+    amount: number;
+    feePct?: number;
+    rate: number;
+    categoryId?: number | null;
+    /** точная сумма в ₽, если она известна (цена заказа), а в валюту кошелька пересчитано по курсу */
+    grossRub?: number;
+  },
   now = Date.now()
 ): number {
   const wallet = getWallet(db, input.walletId);
   const feePct = input.feePct ?? wallet.feePct;
   const fee = pctOf(input.amount, feePct);
   const net = input.amount - fee;
-  const grossRub = toRub(input.amount, input.rate);
-  const feeRub = toRub(fee, input.rate);
+  const grossRub = input.grossRub ?? toRub(input.amount, input.rate);
+  const feeRub = input.grossRub === undefined ? toRub(fee, input.rate) : pctOf(input.grossRub, feePct);
   return db.transaction(() => {
     const id = insertOp(db, 'income', input, checkRef(db, 'categories', input.categoryId, 'income'), grossRub, feeRub, now);
     checkRef(db, 'projects', input.projectId);

@@ -113,4 +113,13 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE operations ADD COLUMN target INTEGER;   -- остаток, микро в валюте кошелька
   ALTER TABLE operations ADD COLUMN rate   REAL;      -- курс к ₽ на момент операции
   `,
+  `
+  -- До какого момента импорт из источника забрал всё. Не дальше самой ранней
+  -- оплаты, которая ждёт (нет курса, нет кошелька): иначе следующий проход начал
+  -- бы после более поздней записанной, и ждущая потерялась бы.
+  CREATE TABLE import_state (
+    source TEXT PRIMARY KEY,
+    cursor INTEGER NOT NULL
+  );
+  `,
 ];

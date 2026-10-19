@@ -12,13 +12,13 @@ export class MoneyInputError extends Error {}
  * разрядов, запятая и точка — дробной части. Отрицательное и пустое отвергается:
  * знак задаёт вид операции, а не минус в поле.
  */
-export function parseAmount(input: unknown): number {
-  const s = String(input ?? '').replace(/[\s  ]/g, '').replace(',', '.');
+export function parseAmount(input: unknown, opts: { allowZero?: boolean } = {}): number {
+  const s = String(input ?? '').replace(/[\s\u00a0\u202f]/g, '').replace(',', '.');
   if (!/^\d+(\.\d{1,6})?$/.test(s)) throw new MoneyInputError(`«${String(input ?? '')}» — не сумма. Пример: 10 000,50`);
   const [int, frac = ''] = s.split('.');
   const micro = Number(int) * MICRO + Number(frac.padEnd(6, '0'));
   if (!Number.isSafeInteger(micro)) throw new MoneyInputError('слишком большая сумма');
-  if (micro === 0) throw new MoneyInputError('сумма — ноль');
+  if (micro === 0 && !opts.allowZero) throw new MoneyInputError('сумма — ноль');
   return micro;
 }
 
@@ -32,7 +32,7 @@ export function parsePct(input: unknown): number {
 
 /** Курс к рублю: сколько рублей за единицу валюты. */
 export function parseRate(input: unknown): number {
-  const s = String(input ?? '').replace(/[\s ]/g, '').replace(',', '.');
+  const s = String(input ?? '').replace(/[\s\u00a0]/g, '').replace(',', '.');
   const n = Number(s);
   if (s === '' || !Number.isFinite(n) || n <= 0) throw new MoneyInputError(`«${String(input ?? '')}» — не курс`);
   return n;

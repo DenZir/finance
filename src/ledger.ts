@@ -10,7 +10,7 @@ import { MoneyInputError, pctOf, toRub } from './money.js';
 
 export type WalletKind = 'provider' | 'crypto' | 'card' | 'cash';
 export const WALLET_KINDS: readonly WalletKind[] = ['provider', 'crypto', 'card', 'cash'];
-export type OpKind = 'income' | 'expense' | 'transfer' | 'payout';
+export type OpKind = 'income' | 'expense' | 'transfer' | 'payout' | 'adjust';
 
 export interface Wallet {
   id: number;
@@ -108,6 +108,33 @@ function insertEntry(db: Db, opId: number, walletId: number, amount: number, rub
 }
 
 /**
+ * Пересчитывает поправки «Остатка» по порядку: каждая — разница между вписанным
+ * остатком и тем, что насчитано на тот момент (операции до него включительно и
+ * предыдущие поправки). Зовётся после любой записи: оплата, импортированная
+ * задним числом, иначе сдвинула бы вписанный остаток.
+ */
+export function recomputeAdjustments(db: Db): void {
+  const adjusts = db
+    .prepare(
+      `SELECT o.id, o.at, o.target, o.rate, e.id AS entryId, e.wallet_id AS walletId
+       FROM operations o JOIN entries e ON e.op_id = o.id
+       WHERE o.kind = 'adjust' ORDER BY o.at, o.id`
+    )
+    .all() as { id: number; at: number; target: number; rate: number | null; entryId: number; walletId: number }[];
+  const before = db.prepare(
+    `SELECT COALESCE(SUM(e.amount), 0) AS s FROM entries e JOIN operations o ON o.id = e.op_id
+     WHERE e.wallet_id = ? AND e.id != ?
+       AND ((o.kind != 'adjust' AND o.at <= ?) OR (o.kind = 'adjust' AND (o.at < ? OR (o.at = ? AND o.id < ?))))`
+  );
+  const update = db.prepare('UPDATE entries SET amount = ?, rub = ? WHERE id = ?');
+  for (const a of adjusts) {
+    const counted = (before.get(a.walletId, a.entryId, a.at, a.at, a.at, a.id) as { s: number }).s;
+    const diff = a.target - counted;
+    update.run(diff, toRub(diff, a.rate ?? 1), a.entryId);
+  }
+}
+
+/**
  * Доход: сумма, которую заплатил покупатель, и комиссия платёжки с неё. На
  * кошелёк ложится сумма за вычетом комиссии — ровно то, что платёжка покажет у
  * себя. Комиссия по умолчанию — ставка кошелька (Platega 14 %, CryptoBot 3 %).
@@ -127,6 +154,7 @@ export function addIncome(
     const id = insertOp(db, 'income', input, checkRef(db, 'categories', input.categoryId, 'income'), grossRub, feeRub, now);
     checkRef(db, 'projects', input.projectId);
     insertEntry(db, id, wallet.id, net, grossRub - feeRub);
+    recomputeAdjustments(db);
     return id;
   })();
 }
@@ -143,6 +171,7 @@ export function addExpense(
     const id = insertOp(db, 'expense', input, checkRef(db, 'categories', input.categoryId, 'expense'), rub, 0, now);
     checkRef(db, 'projects', input.projectId);
     insertEntry(db, id, wallet.id, -input.amount, -rub);
+    recomputeAdjustments(db);
     return id;
   })();
 }
@@ -167,6 +196,7 @@ export function addTransfer(
     const id = insertOp(db, 'transfer', input, null, outRub, outRub - inRub, now);
     insertEntry(db, id, from.id, -input.amount, -outRub);
     insertEntry(db, id, to.id, input.toAmount, inRub);
+    recomputeAdjustments(db);
     return id;
   })();
 }
@@ -185,12 +215,38 @@ export function addPayout(
   return db.transaction(() => {
     const id = insertOp(db, 'payout', input, null, rub, 0, now);
     insertEntry(db, id, wallet.id, -input.amount, -rub);
+    recomputeAdjustments(db);
+    return id;
+  })();
+}
+
+/**
+ * «Остаток»: сколько на кошельке на самом деле на этот момент — по кабинету
+ * платёжки или кошелька. Разница с насчитанным ложится поправкой, которая не
+ * доход и не расход: начальные остатки и сверка не трогают отчёт.
+ */
+export function addAdjustment(
+  db: Db,
+  input: { at: number; walletId: number; balance: number; rate: number; note?: string },
+  now = Date.now()
+): number {
+  const wallet = getWallet(db, input.walletId);
+  if (input.balance < 0) throw new MoneyInputError('остаток не бывает отрицательным');
+  return db.transaction(() => {
+    const id = insertOp(db, 'adjust', { at: input.at, note: input.note }, null, 0, 0, now);
+    db.prepare('UPDATE operations SET target = ?, rate = ? WHERE id = ?').run(input.balance, input.rate, id);
+    insertEntry(db, id, wallet.id, 0, 0);
+    recomputeAdjustments(db);
     return id;
   })();
 }
 
 export function deleteOperation(db: Db, id: number): boolean {
-  return db.prepare('DELETE FROM operations WHERE id = ?').run(id).changes > 0;
+  return db.transaction(() => {
+    const deleted = db.prepare('DELETE FROM operations WHERE id = ?').run(id).changes > 0;
+    if (deleted) recomputeAdjustments(db);
+    return deleted;
+  })();
 }
 
 export interface OperationRow {
@@ -203,6 +259,8 @@ export interface OperationRow {
   grossRub: number;
   feeRub: number;
   source: string;
+  /** у «Остатка» — вписанный остаток, микро в валюте кошелька */
+  target: number | null;
   entries: { walletId: number; amount: number; rub: number }[];
 }
 
@@ -214,7 +272,7 @@ export function listOperations(db: Db, from: number, to: number): OperationRow[]
     .all(...ops.map((o) => o.id)) as any[];
   return ops.map((o) => ({
     id: o.id, kind: o.kind, at: o.at, projectId: o.project_id, categoryId: o.category_id, note: o.note,
-    grossRub: o.gross_rub, feeRub: o.fee_rub, source: o.source,
+    grossRub: o.gross_rub, feeRub: o.fee_rub, source: o.source, target: o.target ?? null,
     entries: entries.filter((e) => e.op_id === o.id).map((e) => ({ walletId: e.wallet_id, amount: e.amount, rub: e.rub })),
   }));
 }

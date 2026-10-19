@@ -104,4 +104,13 @@ export const MIGRATIONS: readonly string[] = [
     ('Platega', 'RUB', 'provider', 14, CAST(strftime('%s','now') AS INTEGER) * 1000),
     ('CryptoBot', 'USDT', 'provider', 3, CAST(strftime('%s','now') AS INTEGER) * 1000);
   `,
+  `
+  -- «Остаток»: владелец вписывает фактический баланс кошелька на дату, а
+  -- проводка-поправка — разница с тем, что насчитано. Хранится сам остаток, а не
+  -- разница: импорт, дописавший оплаты задним числом, иначе сдвинул бы баланс, и
+  -- вписанное «на 01.10 было 12 340 ₽» перестало бы быть правдой. Поправка
+  -- пересчитывается после каждой записи (ledger.recomputeAdjustments).
+  ALTER TABLE operations ADD COLUMN target INTEGER;   -- остаток, микро в валюте кошелька
+  ALTER TABLE operations ADD COLUMN rate   REAL;      -- курс к ₽ на момент операции
+  `,
 ];

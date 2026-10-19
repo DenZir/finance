@@ -5,7 +5,7 @@ const $ = (s) => document.querySelector(s);
 const MICRO = 1e6;
 const MSK = 3 * 3600e3;
 const KIND_LABEL = { provider: 'платёжка', crypto: 'крипта', card: 'карта', cash: 'наличные' };
-const OP_LABEL = { income: 'Доход', expense: 'Расход', transfer: 'Перевод', payout: 'Партнёру' };
+const OP_LABEL = { income: 'Доход', expense: 'Расход', transfer: 'Перевод', payout: 'Партнёру', adjust: 'Остаток' };
 
 let S = null; // state
 let month = monthOf(Date.now());
@@ -117,7 +117,12 @@ function opLine(o) {
   const w = (id) => S.wallets.find((x) => x.id === id);
   const [a, b] = o.entries;
   let title, sum, sub;
-  if (o.kind === 'transfer' && a && b) {
+  if (o.kind === 'adjust' && a) {
+    const wallet = w(a.walletId);
+    title = `Остаток · ${esc(wallet?.name)}`;
+    sum = amt(o.target ?? 0, wallet?.currency);
+    sub = a.amount === 0 ? 'сошлось' : `поправка ${a.amount > 0 ? '+' : '−'}${amt(Math.abs(a.amount), wallet?.currency)}`;
+  } else if (o.kind === 'transfer' && a && b) {
     title = `${esc(w(a.walletId)?.name)} → ${esc(w(b.walletId)?.name)}`;
     sum = `${amt(-a.amount, w(a.walletId)?.currency)} → ${amt(b.amount, w(b.walletId)?.currency)}`;
     sub = o.feeRub ? `потеря ${rub(o.feeRub)}` : '';
@@ -173,6 +178,9 @@ function renderOpFields() {
       <label>Куда<select name="toWalletId">${walletOpts()}</select></label>
       <label>Пришло<input name="toAmount" inputmode="decimal" required placeholder="100"></label>
       ${rate('rate', 'Курс «откуда» к ₽')}${rate('toRate', 'Курс «куда» к ₽')}${date}${note}`;
+  if (opKind === 'adjust')
+    html = `<label>Кошелёк<select name="walletId">${walletOpts()}</select></label>${date}
+      <label class="wide">Сколько на самом деле<input name="amount" inputmode="decimal" required placeholder="12 340"></label>${rate()}${note}`;
   if (opKind === 'payout')
     html = `<label>Кошелёк<select name="walletId">${walletOpts()}</select></label>${date}
       <label>Сумма<input name="amount" inputmode="decimal" required></label>
@@ -185,6 +193,7 @@ function renderOpFields() {
     expense: 'Расход проекта с партнёром уменьшит долг перед ним на его долю.',
     transfer: 'Впишите, сколько ушло и сколько пришло — разница в рублях станет комиссией вывода (3 %, Rapira, курс).',
     payout: 'Выплата закрывает долг перед партнёром по проекту.',
+    adjust: 'Фактический баланс по кабинету платёжки или кошелька на эту дату. Разница с насчитанным станет поправкой — она не доход и не расход. Так вносятся начальные остатки.',
   }[opKind];
   syncRates();
 }

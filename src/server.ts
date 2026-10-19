@@ -11,7 +11,7 @@ import type { Config } from './config.js';
 import { SESSION_COOKIE, SESSION_MS, checkTelegramLogin, createSession, dropSession, sessionUser } from './auth.js';
 import { MoneyInputError, parseAmount, parsePct, parseRate } from './money.js';
 import {
-  WALLET_KINDS, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
+  WALLET_KINDS, addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
   listCategories, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet,
   type Wallet,
   type WalletKind,
@@ -150,6 +150,11 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
         case 'payout': {
           const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
           id = addPayout(db, { ...base, walletId: w.id, amount: parseAmount(b.amount), projectId: reqId(b.projectId, 'проект'), rate: await rateFor(w.currency, b.rate) }, now());
+          break;
+        }
+        case 'adjust': {
+          const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
+          id = addAdjustment(db, { at, walletId: w.id, balance: parseAmount(b.amount, { allowZero: true }), rate: await rateFor(w.currency, b.rate), note: base.note }, now());
           break;
         }
         default:

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../src/db/index.js';
 import { MICRO, MoneyInputError, parseAmount } from '../src/money.js';
 import {
-  addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, listCategories,
+  addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, listCategories,
   listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts,
 } from '../src/ledger.js';
 
@@ -108,4 +108,44 @@ test('свой кошелёк: валюта кодом, без названия 
   assert.throws(() => createWallet(db, { name: ' ', currency: 'TON', kind: 'crypto' }), MoneyInputError);
   assert.throws(() => addExpense(db, { at: AT, walletId: wallet('Platega').id, amount: rub(1), rate: 1, categoryId: category('Приватка').id }), /вид дохода/);
   assert.equal(listOperations(db, 0, Date.now() * 2).length, 0, 'отказ не оставил полуоперации');
+});
+
+/**
+ * «Остаток» — вписанный фактический баланс. Начальные остатки вносятся им, и в
+ * доход месяца они не попадают: иначе 12 тысяч, лежавших на Platega до начала
+ * учёта, выглядели бы выручкой.
+ */
+test('остаток ставит баланс на дату и не трогает отчёт', () => {
+  const { db, wallet } = setup();
+  const platega = wallet('Platega');
+  addAdjustment(db, { at: AT, walletId: platega.id, balance: rub(12_340), rate: 1 });
+  assert.equal(balances(db).get(platega.id), rub(12_340));
+  const r = monthReport(db, ...Object.values(monthRange('2026-10')) as [number, number]);
+  assert.equal(r.totalIncome, 0);
+  assert.equal(r.net, 0);
+  // сверка позже: насчитано больше, чем в кабинете, — поправка в минус
+  addIncome(db, { at: AT + 1000, walletId: platega.id, amount: rub(1000), feePct: 0, rate: 1 });
+  addAdjustment(db, { at: AT + 2000, walletId: platega.id, balance: rub(13_000), rate: 1 });
+  assert.equal(balances(db).get(platega.id), rub(13_000));
+  const ops = listOperations(db, AT - 1, AT + 3000);
+  assert.equal(ops[0]!.kind, 'adjust');
+  assert.equal(ops[0]!.entries[0]!.amount, rub(-340));
+});
+
+/**
+ * Оплаты привата приходят импортом задним числом. Вписанный «на 19.10 было
+ * 12 340 ₽» от этого не должен сдвинуться — пересчитывается поправка.
+ */
+test('операция задним числом не сдвигает вписанный остаток, а меняет поправку', () => {
+  const { db, wallet } = setup();
+  const platega = wallet('Platega');
+  addAdjustment(db, { at: AT, walletId: platega.id, balance: rub(12_340), rate: 1 });
+  addIncome(db, { at: AT - 3600_000, walletId: platega.id, amount: rub(1000), feePct: 0, rate: 1 }); // за час до сверки
+  assert.equal(balances(db).get(platega.id), rub(12_340), 'на момент сверки — ровно вписанное');
+  addIncome(db, { at: AT + 3600_000, walletId: platega.id, amount: rub(500), feePct: 0, rate: 1 }); // после сверки
+  assert.equal(balances(db).get(platega.id), rub(12_840));
+  // удалили поправку — баланс снова насчитанный
+  const adj = listOperations(db, AT - 1, AT + 1).find((o) => o.kind === 'adjust')!;
+  deleteOperation(db, adj.id);
+  assert.equal(balances(db).get(platega.id), rub(1500));
 });

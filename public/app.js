@@ -129,16 +129,22 @@ function openPay(ref) {
   $('#payError').hidden = true;
   $('#payTitle').textContent = d.kind === 'sale' ? 'Продажа оплачена' : 'Закуп оплачен';
   $('#payDeal').textContent = `${dealDay(d.date)} · ${dealTitle(d)} · ${[d.contact, d.channels].filter(Boolean).join(' · ')}${d.amount != null ? ` · ${rub(d.amount)}` : ''}`;
-  f.walletId.innerHTML = walletOpts();
+  f.walletId.innerHTML = adWallets().map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
   f.date.value = todayIso();
   $('#payAmountLabel').firstChild.textContent = d.kind === 'sale' ? 'Сколько пришло' : 'Сколько ушло';
-  f.querySelector('[data-pay-fee]').hidden = d.kind !== 'sale';
   $('#payHint').textContent = d.kind === 'sale'
-    ? 'Доход «Реклама» на этот кошелёк. При взаимозачёте впишите, сколько пришло на самом деле.'
-    : 'Расход «Закуп рекламы» с этого кошелька.';
+    ? 'Доход «Реклама», без комиссии. Сумма сделки пересчитана по курсу — впишите, сколько пришло на самом деле (при взаимозачёте — разницу).'
+    : 'Расход «Закуп рекламы» с этого кошелька, без комиссии.';
   syncPay();
   $('#payDlg').showModal();
 }
+
+// За рекламу платят переводом на CryptoBot: он первым, а платёжки, принимающие
+// оплату картой (Platega), в список не попадают.
+const adWallets = () =>
+  S.wallets
+    .filter((w) => !w.archived && (w.kind !== 'provider' || /cryptobot/i.test(w.name)))
+    .sort((a, b) => /cryptobot/i.test(b.name) - /cryptobot/i.test(a.name));
 
 // сумма сделки — в рублях; на кошелёк в другой валюте подставляем по курсу
 function syncPay() {

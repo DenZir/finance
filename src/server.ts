@@ -183,7 +183,6 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
       const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
       const id = payDeal(db, String(req.params.ref), {
         walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
-        feePct: b.feePct === undefined || b.feePct === '' ? undefined : parsePct(b.feePct),
       }, now());
       res.json({ id });
     } catch (err) {

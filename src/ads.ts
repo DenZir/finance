@@ -143,13 +143,13 @@ const dealNote = (d: AdDealView) =>
 /**
  * «Оплачено»: сколько пришло (продажа) или ушло (закуп) на этом кошельке, в его
  * валюте. Сумма — не обязательно сумма сделки: при взаимозачёте с тем же
- * человеком приходит разница. Комиссии по умолчанию нет — реклама платится
- * переводом, а не через приём платёжки.
+ * человеком приходит разница. Комиссии нет: за рекламу платят переводом на
+ * CryptoBot, а не через приём платёжки (владелец, 2026-10-19).
  */
 export function payDeal(
   db: Db,
   ref: string,
-  input: { walletId: number; amount: number; rate: number; at: number; feePct?: number },
+  input: { walletId: number; amount: number; rate: number; at: number },
   now = Date.now()
 ): number {
   const d = getDeal(db, ref);
@@ -162,7 +162,7 @@ export function payDeal(
   return db.transaction(() => {
     db.prepare('UPDATE ad_deals SET barter_at = NULL WHERE ref = ?').run(ref);
     return d.kind === 'sale'
-      ? addIncome(db, { ...base, feePct: input.feePct ?? 0, categoryId: cat('income', d.slot === 'stories' ? 'Реклама — сторисы' : 'Реклама — посты') }, now)
+      ? addIncome(db, { ...base, feePct: 0, categoryId: cat('income', d.slot === 'stories' ? 'Реклама — сторисы' : 'Реклама — посты') }, now)
       : addExpense(db, { ...base, categoryId: cat('expense', 'Закуп рекламы') }, now);
   })();
 }

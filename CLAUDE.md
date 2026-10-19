@@ -35,6 +35,11 @@ npm run typecheck  # tsc --noEmit
 - `src/rates.ts` — курсы к рублю (CoinGecko + последний известный в базе).
 - `src/auth.ts` — проверка подписи Telegram Login и сессии.
 - `src/server.ts` — API и раздача `public/`.
+- `src/import/botprivat.ts` — оплаты привата из ботприватa; `src/ads.ts` — сделки
+  рекламы из tg-analytics (оплачено / ждём оплату / бартер); `src/vpn.ts` —
+  оплаты VPN из tg-analytics на кошельки с ролью `vpn:platega` / `vpn:cryptobot`.
+- `src/bot/` — бот входа он же бот учёта: запись строкой, /balance, /debts,
+  напоминание о долгах. Bot API — через `fetch`, без библиотек.
 
 Правила учёта: доход хранится до комиссии (`gross_rub`) и с комиссией
 (`fee_rub`), на кошелёк ложится разница. Комиссия перевода — разница в рублях

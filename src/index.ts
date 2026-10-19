@@ -5,6 +5,8 @@ import { createApp } from './server.js';
 import { httpOrders, importBotprivat } from './import/botprivat.js';
 import { httpDeals, syncDeals } from './ads.js';
 import { httpPayments, syncVpn } from './vpn.js';
+import { botApi, httpBotCall, startPolling } from './bot/api.js';
+import { createBot } from './bot/index.js';
 
 const config = readConfig();
 const db = openDb(config.dbPath);
@@ -82,8 +84,32 @@ if (an && vpnProject) {
   console.log(`[vpn] оплаты VPN — проект «${vpnProject}» в ${an.url}`);
 }
 
+// Бот: быстрая запись операций, /balance, /debts и напоминание о долгах.
+// Сбой бота сервер и импорт не роняет — опрос сам ловит ошибки и ждёт.
+let poller: { stop: () => void } | null = null;
+const reminderHour = config.reminderHour;
+if (config.botPolling || reminderHour !== null) {
+  const api = botApi(httpBotCall(config.botToken));
+  const bot = createBot({ db, api, ownerIds: config.ownerIds, fetchRate: coingecko, publicUrl: config.publicUrl });
+  if (config.botPolling) {
+    poller = startPolling(api, bot.handleUpdate);
+    console.log(`[bot] опрашиваю @${config.botUsername}`);
+  } else {
+    console.log('[bot] опрос бота выключен (BOT_POLLING=off)');
+  }
+  if (reminderHour !== null) {
+    // Раз в минуту: настал ли час по Москве. Какой день уже напомнили — в базе,
+    // так что перезапуск после этого часа второго напоминания не шлёт.
+    setInterval(() => {
+      bot.remind(reminderHour).catch((err) => console.warn('[bot] напоминание о долгах не вышло:', err instanceof Error ? err.message : err));
+    }, 60_000);
+    console.log(`[bot] напоминание о долгах рекламы — в ${reminderHour}:00 МСК`);
+  }
+}
+
 const stop = (signal: string) => {
   console.log(`[finance] ${signal}, останавливаюсь`);
+  poller?.stop();
   server.close(() => {
     db.close();
     process.exit(0);

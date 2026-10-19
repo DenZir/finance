@@ -17,7 +17,7 @@ import {
   type WalletKind,
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
-import { adDebts, listDeals, payDeal, setBarter } from './ads.js';
+import { adDebts, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -192,6 +192,11 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
 
   app.post('/api/ad-deals/:ref/barter', (req, res) => {
     setBarter(db, String(req.params.ref), req.body?.on !== false, now());
+    res.json({ ok: true });
+  });
+
+  app.post('/api/ad-deals/:ref/waiting', (req, res) => {
+    setWaiting(db, String(req.params.ref), req.body?.on !== false, now());
     res.json({ ok: true });
   });
 

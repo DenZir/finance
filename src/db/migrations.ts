@@ -143,4 +143,10 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX ad_deals_date ON ad_deals(date);
   `,
+  `
+  -- «Ждём оплату»: владелец подтвердил, что за сделку должны заплатить (или он
+  -- должен). Только такие сделки — «Нам должны» и «Мы должны»; остальные
+  -- пришедшие из аналитики просто ещё не разобраны.
+  ALTER TABLE ad_deals ADD COLUMN waiting_at INTEGER;
+  `,
 ];

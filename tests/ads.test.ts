@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../src/db/index.js';
 import { MICRO } from '../src/money.js';
 import { balances, deleteOperation, listCategories, listOperations, listWallets, monthRange, monthReport } from '../src/ledger.js';
-import { adDebts, listDeals, payDeal, setBarter, syncDeals, type AnalyticsDeal } from '../src/ads.js';
+import { adDebts, listDeals, payDeal, setBarter, setWaiting, syncDeals, type AnalyticsDeal } from '../src/ads.js';
 
 const T = Date.UTC(2026, 9, 19, 9);
 const SINCE = Date.UTC(2026, 9, 1) - 3 * 3600_000;
@@ -34,8 +34,11 @@ test('сверка, оплата, бартер и долги по рекламе
   assert.deepEqual(await syncDeals(db, deps, T), { added: 0 }, 'повторная сверка не добавляет');
   assert.equal(asked[0], '2026-10-01', 'дата начала — по Москве');
 
-  assert.deepEqual(adDebts(db), { owedToUs: rub(2300), weOwe: rub(1200), owedToUsCount: 2, weOweCount: 1, unknown: 1 },
-    'отменённая не висит, CPM без суммы — отдельно');
+  assert.deepEqual(adDebts(db), { owedToUs: 0, weOwe: 0, owedToUsCount: 0, weOweCount: 0, unknown: 0, unsorted: 4 },
+    'неразобранные — ещё не долг; отменённая не в счёт');
+  for (const ref of ['sale:1', 'sale:2', 'buy:7', 'buy:8']) setWaiting(db, ref, true, T);
+  assert.deepEqual(adDebts(db), { owedToUs: rub(2300), weOwe: rub(1200), owedToUsCount: 2, weOweCount: 2, unknown: 1, unsorted: 0 },
+    'ждём оплату — долг; CPM без суммы — отдельно');
 
   // CPM получил сумму, продажу 2 удалили в аналитике
   list = list.filter((d) => d.ref !== 'sale:2').map((d) => (d.ref === 'buy:8' ? { ...d, amount: 450 } : d));
@@ -43,7 +46,7 @@ test('сверка, оплата, бартер и долги по рекламе
   const byRef = (ref: string) => listDeals(db).find((d) => d.ref === ref)!;
   assert.equal(byRef('buy:8').amount, rub(450));
   assert.equal(byRef('sale:2').cancelled, true, 'удалённая в аналитике — отменена');
-  assert.deepEqual(adDebts(db), { owedToUs: rub(1500), weOwe: rub(1650), owedToUsCount: 1, weOweCount: 2, unknown: 0 });
+  assert.deepEqual(adDebts(db), { owedToUs: rub(1500), weOwe: rub(1650), owedToUsCount: 1, weOweCount: 2, unknown: 0, unsorted: 0 });
 
   const w = (name: string) => listWallets(db).find((x) => x.name === name)!.id;
   const at = Date.UTC(2026, 9, 6, 9);
@@ -57,7 +60,7 @@ test('сверка, оплата, бартер и долги по рекламе
   payDeal(db, 'buy:7', { walletId: w('Platega'), amount: rub(1200), rate: 1, at }, T);
   setBarter(db, 'buy:8', true, T);
   assert.equal(byRef('buy:8').state, 'barter');
-  assert.deepEqual(adDebts(db), { owedToUs: 0, weOwe: 0, owedToUsCount: 0, weOweCount: 0, unknown: 0 });
+  assert.deepEqual(adDebts(db), { owedToUs: 0, weOwe: 0, owedToUsCount: 0, weOweCount: 0, unknown: 0, unsorted: 0 });
 
   const cat = (id: number | null) => listCategories(db).find((c) => c.id === id)?.name;
   const { from, to } = monthRange('2026-10');
@@ -70,11 +73,15 @@ test('сверка, оплата, бартер и долги по рекламе
   const r = monthReport(db, from, to);
   assert.equal(r.net, rub(300), 'бартер в отчёт не попадает');
 
-  // удалили операцию — сделка снова ждёт
+  // удалили операцию — сделка снова ждёт оплату, а не уходит в неразобранные
   deleteOperation(db, ops.find((o) => o.kind === 'expense')!.id);
-  assert.equal(byRef('buy:7').state, 'open');
+  assert.equal(byRef('buy:7').state, 'waiting');
   assert.equal(adDebts(db).weOwe, rub(1200));
 
+  // бартер снял «ждём оплату»: вернули — сделка неразобранная
   setBarter(db, 'buy:8', false, T);
   assert.equal(byRef('buy:8').state, 'open');
+  setWaiting(db, 'buy:7', false, T);
+  assert.equal(byRef('buy:7').state, 'open');
+  assert.equal(adDebts(db).unsorted, 2);
 });

@@ -84,8 +84,8 @@ function renderTiles(report) {
       ? tile(`Должен партнёру · ${esc(vpn.name)}`, rub(Math.max(vpn.owed, 0)), vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода и расходов`, vpn.owed > 0 ? 'warn' : '')
       : tile('Должен партнёру', '—', 'нет проектов с партнёром')) +
     tile('Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad') +
-    tile('Нам должны', rub(S.ads.owedToUs), S.ads.owedToUsCount ? `продажи рекламы без оплаты: ${S.ads.owedToUsCount}` : 'по рекламе всё оплачено', S.ads.owedToUs ? 'warn' : '') +
-    tile('Мы должны', rub(S.ads.weOwe), S.ads.weOweCount ? `закупы без оплаты: ${S.ads.weOweCount}` : 'по закупам всё оплачено', S.ads.weOwe ? 'warn' : '');
+    tile('Нам должны', rub(S.ads.owedToUs), S.ads.owedToUsCount ? `ждём оплату за продажи: ${S.ads.owedToUsCount}` : 'никто не должен', S.ads.owedToUs ? 'warn' : '') +
+    tile('Мы должны', rub(S.ads.weOwe), S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны', S.ads.weOwe ? 'warn' : '');
 }
 
 // --- реклама ------------------------------------------------------------------
@@ -93,31 +93,51 @@ const SLOT = { morning: 'утро', day: 'день', evening: 'вечер', nigh
 const dealDay = (date) => `${date.slice(8, 10)}.${date.slice(5, 7)}`;
 const dealTitle = (d) => `${d.kind === 'sale' ? 'Продажа' : 'Закуп'} · ${SLOT[d.slot] ?? esc(d.slot)}`;
 
+// сколько дней прошло с дня места; для будущих — через сколько
+function dealAge(date) {
+  const days = Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${todayIso()}T00:00:00Z`)) / 86400e3);
+  if (days === 0) return 'сегодня';
+  return days < 0 ? `${-days} дн. назад` : `через ${days} дн.`;
+}
+
 function dealLine(d) {
   const sum = d.amount == null ? '<span class="muted">суммы ещё нет</span>' : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(d.amount)}</span>`;
+  const ref = esc(d.ref);
+  const waitLabel = d.kind === 'sale' ? 'Ждём оплату' : 'Надо оплатить';
   let acts;
   if (d.state === 'paid') acts = `<span class="chip">оплачено</span>${d.cancelled ? ' <span class="chip warn">отменена в аналитике</span>' : ''}`;
-  else if (d.state === 'barter') acts = `<span class="chip">бартер</span><button class="btn ghost" type="button" data-unbarter="${esc(d.ref)}">Вернуть</button>`;
-  else if (d.cancelled) acts = '<span class="chip">отменена</span>';
-  else acts = `<button class="btn primary" type="button" data-pay="${esc(d.ref)}">Оплачено</button><button class="btn" type="button" data-barter="${esc(d.ref)}">Бартер</button>`;
-  const done = d.state !== 'open' || d.cancelled;
+  else if (d.state === 'barter') acts = `<span class="chip">бартер</span><button class="btn ghost" type="button" data-unbarter="${ref}">Вернуть</button>`;
+  else if (d.cancelled) acts = `<span class="chip">отменена</span>${d.state === 'waiting' ? `<button class="btn ghost" type="button" data-unwait="${ref}">Не ждём</button>` : ''}`;
+  else if (d.state === 'waiting')
+    acts = `<button class="btn primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-barter="${ref}">Бартер</button><button class="btn ghost" type="button" data-unwait="${ref}" title="Вернуть в неразобранные">×</button>`;
+  else
+    acts = `<button class="btn primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
+  const done = d.state === 'paid' || d.state === 'barter' || d.cancelled;
+  const sub = [esc(d.contact), esc(d.channels), d.state === 'waiting' && !d.cancelled ? `<span class="age">${dealAge(d.date)}</span>` : ''].filter(Boolean).join(' · ');
   return `<div class="deal${done ? ' done' : ''}"><span class="when">${dealDay(d.date)}</span>
-    <div class="what"><b>${dealTitle(d)}</b><small>${[esc(d.contact), esc(d.channels)].filter(Boolean).join(' · ')}</small></div>
+    <div class="what"><b>${dealTitle(d)}</b><small>${sub}</small></div>
     <div class="sum">${sum}</div><div class="acts">${acts}</div></div>`;
 }
 
 function renderAds() {
   $('#adsCard').hidden = !deals.length;
   if (!deals.length) return;
-  $('#adsAll').textContent = adsAll ? 'Только ждущие' : 'Все сделки';
-  // ждут решения — по дате; оплаченная, но отменённая в аналитике тоже на виду
-  const shown = adsAll
-    ? [...deals].sort((a, b) => b.date.localeCompare(a.date))
-    : deals.filter((d) => (d.state === 'open' && !d.cancelled) || (d.state === 'paid' && d.cancelled));
-  const unknown = S.ads.unknown ? `<span>без суммы: ${S.ads.unknown} — CPM ждёт просмотров или ПДП подсчёта</span>` : '';
+  $('#adsAll').textContent = adsAll ? 'Свернуть' : 'Все сделки';
+  if (adsAll) {
+    const all = [...deals].sort((a, b) => b.date.localeCompare(a.date));
+    $('#ads').innerHTML = all.map(dealLine).join('');
+    return;
+  }
+  // ждём оплату — самые давние сверху: они первые, кому пора напомнить;
+  // оплаченная, но отменённая в аналитике тоже на виду
+  const waiting = deals.filter((d) => (d.state === 'waiting' && !d.cancelled) || (d.state === 'paid' && d.cancelled) || (d.state === 'waiting' && d.cancelled));
+  const unsorted = deals.filter((d) => d.state === 'open' && !d.cancelled);
+  const group = (title, list, empty) =>
+    `<h3 class="ads-h">${title}${list.length ? ` · ${list.length}` : ''}</h3>` + (list.length ? list.map(dealLine).join('') : `<div class="empty">${empty}</div>`);
+  const unknown = S.ads.unknown ? `<div class="ads-sum"><span>без суммы: ${S.ads.unknown} — CPM ждёт просмотров или ПДП подсчёта, в долги пока не входят</span></div>` : '';
   $('#ads').innerHTML =
-    (adsAll ? '' : `<div class="ads-sum"><span>ждут решения: ${shown.length}</span>${unknown}</div>`) +
-    (shown.length ? shown.map(dealLine).join('') : '<div class="empty">Все сделки разобраны — оплачены или бартер.</div>');
+    group('Ждём оплату', waiting, 'Никто никому не должен.') + unknown +
+    (unsorted.length ? group('Не разобраны', unsorted, '') : '');
 }
 
 function openPay(ref) {
@@ -335,13 +355,15 @@ $('#walletForm').addEventListener('submit', async (e) => {
 $('#ads').addEventListener('click', async (e) => {
   const pay = e.target.closest('[data-pay]');
   if (pay) return openPay(pay.dataset.pay);
-  const b = e.target.closest('[data-barter],[data-unbarter]');
+  const b = e.target.closest('[data-barter],[data-unbarter],[data-wait],[data-unwait]');
   if (!b) return;
-  const on = !!b.dataset.barter;
+  const { barter, unbarter, wait, unwait } = b.dataset;
+  const isBarter = !!(barter || unbarter);
+  const on = !!(barter || wait);
   try {
-    await api(`/api/ad-deals/${encodeURIComponent(b.dataset.barter || b.dataset.unbarter)}/barter`, { method: 'POST', body: JSON.stringify({ on }) });
+    await api(`/api/ad-deals/${encodeURIComponent(barter || unbarter || wait || unwait)}/${isBarter ? 'barter' : 'waiting'}`, { method: 'POST', body: JSON.stringify({ on }) });
     await load();
-    toast(on ? 'Бартер — без денег' : 'Сделка снова ждёт');
+    toast(isBarter ? (on ? 'Бартер — без денег' : 'Сделка снова не разобрана') : on ? 'Ждём оплату' : 'Сделка снова не разобрана');
   } catch (err) {
     toast(err.message);
   }

@@ -77,12 +77,15 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .deal .what b { font-weight: 500; }
 .deal .what small { display: block; color: var(--muted); overflow-wrap: anywhere; }
 .deal .sum { text-align: right; font-family: var(--mono); white-space: nowrap; }
-.deal .acts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+.deal .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
 .deal .acts .btn { padding: 6px 10px; }
 .deal.done { opacity: .6; }
 .chip.warn { color: var(--warn); border-color: var(--warn); }
 .ads-sum { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin: -4px 0 8px; }
 .pay-deal { margin: -4px 0 12px; font-size: 13px; }
+.ads-h { margin: 14px 0 2px; font-size: 13px; color: var(--muted); font-weight: 500; }
+.ads-h:first-child { margin-top: 0; }
+.deal .age { color: var(--warn); }
 
 .dlg { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }
 .dlg::backdrop { background: rgba(0,0,0,.6); }

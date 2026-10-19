@@ -95,8 +95,8 @@ export interface AdDealView {
   channels: string;
   amount: number | null;
   cancelled: boolean;
-  /** open — ждёт решения; paid — есть операция; barter — без денег */
-  state: 'open' | 'paid' | 'barter';
+  /** open — не разобрана; waiting — ждём оплату; paid — есть операция; barter — без денег */
+  state: 'open' | 'waiting' | 'paid' | 'barter';
   opId: number | null;
 }
 
@@ -111,23 +111,27 @@ export function listDeals(db: Db): AdDealView[] {
   return rows.map((r) => ({
     ref: r.ref, kind: r.kind, date: r.date, slot: r.slot, contact: r.contact, channels: r.channels,
     amount: r.amount ?? null, cancelled: !!r.cancelled,
-    state: r.op_id ? 'paid' : r.barter_at ? 'barter' : 'open',
+    state: r.op_id ? 'paid' : r.barter_at ? 'barter' : r.waiting_at ? 'waiting' : 'open',
     opId: r.op_id ?? null,
   }));
 }
 
 /**
- * Что висит без решения: продажи — нам должны, закупы — мы должны. Отменённые
- * не висят; сделки без суммы (CPM ждёт просмотров) считаются отдельно.
+ * Долги — только сделки с отметкой «Ждём оплату»: продажи — нам должны, закупы —
+ * мы должны. Неразобранные считаются отдельно, чтобы не выдавать за долг то,
+ * что могло быть бартером или оплачено ещё до начала учёта. Сделки без суммы
+ * (CPM ждёт просмотров) в сумму не входят.
  */
-export function adDebts(db: Db): { owedToUs: number; weOwe: number; owedToUsCount: number; weOweCount: number; unknown: number } {
-  const open = listDeals(db).filter((d) => d.state === 'open' && !d.cancelled);
-  const sum = (kind: 'buy' | 'sale') => open.filter((d) => d.kind === kind && d.amount !== null).reduce((s, d) => s + d.amount!, 0);
-  const count = (kind: 'buy' | 'sale') => open.filter((d) => d.kind === kind && d.amount !== null).length;
+export function adDebts(db: Db): { owedToUs: number; weOwe: number; owedToUsCount: number; weOweCount: number; unknown: number; unsorted: number } {
+  const live = listDeals(db).filter((d) => !d.cancelled);
+  const waiting = live.filter((d) => d.state === 'waiting');
+  const sum = (kind: 'buy' | 'sale') => waiting.filter((d) => d.kind === kind && d.amount !== null).reduce((s, d) => s + d.amount!, 0);
+  const count = (kind: 'buy' | 'sale') => waiting.filter((d) => d.kind === kind).length;
   return {
     owedToUs: sum('sale'), weOwe: sum('buy'),
     owedToUsCount: count('sale'), weOweCount: count('buy'),
-    unknown: open.filter((d) => d.amount === null).length,
+    unknown: waiting.filter((d) => d.amount === null).length,
+    unsorted: live.filter((d) => d.state === 'open').length,
   };
 }
 
@@ -171,5 +175,15 @@ export function payDeal(
 export function setBarter(db: Db, ref: string, on: boolean, now = Date.now()): void {
   const d = getDeal(db, ref);
   if (on && d.state === 'paid') throw new MoneyInputError('сделка уже оплачена — удалите операцию, если это был бартер');
-  db.prepare('UPDATE ad_deals SET barter_at = ? WHERE ref = ?').run(on ? now : null, ref);
+  db.prepare(on ? 'UPDATE ad_deals SET barter_at = ?, waiting_at = NULL WHERE ref = ?' : 'UPDATE ad_deals SET barter_at = ? WHERE ref = ?').run(on ? now : null, ref);
+}
+
+/**
+ * «Ждём оплату» и отмена отметки. Оплата её не снимает: удалили операцию —
+ * сделка снова ждёт оплату, а не возвращается в неразобранные.
+ */
+export function setWaiting(db: Db, ref: string, on: boolean, now = Date.now()): void {
+  const d = getDeal(db, ref);
+  if (on && d.state === 'paid') throw new MoneyInputError('сделка уже оплачена');
+  db.prepare(on ? 'UPDATE ad_deals SET waiting_at = ?, barter_at = NULL WHERE ref = ?' : 'UPDATE ad_deals SET waiting_at = ? WHERE ref = ?').run(on ? now : null, ref);
 }

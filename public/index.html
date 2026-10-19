@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Деньги</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2357b6ff'/><text x='16' y='23' font-size='18' text-anchor='middle' fill='%230b0f14' font-family='sans-serif' font-weight='700'>₽</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" class="login" hidden>
+  <div class="login-card">
+    <div class="brand"><span class="logo">₽</span><b>Деньги</b></div>
+    <p class="muted">Учёт доходов, комиссий и кошельков. Вход — через Telegram, только для владельца.</p>
+    <div id="widget"></div>
+    <p id="loginError" class="err" hidden></p>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <div class="brand"><span class="logo">₽</span><b>Деньги</b></div>
+    <div class="month">
+      <button class="icon" id="prevMonth" type="button" aria-label="Прошлый месяц">‹</button>
+      <span id="monthLabel"></span>
+      <button class="icon" id="nextMonth" type="button" aria-label="Следующий месяц">›</button>
+    </div>
+    <button class="btn ghost" id="logout" type="button">Выйти</button>
+  </header>
+
+  <main class="wrap">
+    <section class="tiles" id="tiles"></section>
+
+    <section class="card">
+      <div class="card-h"><h2>Кошельки</h2><button class="btn" id="addWallet" type="button">+ Кошелёк</button></div>
+      <div id="wallets" class="wallets"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-h"><h2>Итоги месяца</h2></div>
+      <div id="report"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-h"><h2>Операции</h2><button class="btn primary" id="addOp" type="button">+ Операция</button></div>
+      <div id="ops"></div>
+    </section>
+  </main>
+</div>
+
+<dialog id="opDlg" class="dlg">
+  <form id="opForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Новая операция</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="seg" role="tablist" id="opKinds">
+      <button type="button" data-kind="income" class="on">Доход</button>
+      <button type="button" data-kind="expense">Расход</button>
+      <button type="button" data-kind="transfer">Перевод</button>
+      <button type="button" data-kind="payout">Партнёру</button>
+    </div>
+    <div id="opFields" class="fields"></div>
+    <p id="opHint" class="hint"></p>
+    <p id="opError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<dialog id="walletDlg" class="dlg">
+  <form id="walletForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Новый кошелёк</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="fields">
+      <label>Название<input name="name" required placeholder="Tonkeeper, Тинькофф…"></label>
+      <label>Валюта<input name="currency" required placeholder="RUB, USDT, TON, TRX" autocapitalize="characters"></label>
+      <label>Вид<select name="kind">
+        <option value="crypto">Крипто-кошелёк</option>
+        <option value="provider">Платёжка</option>
+        <option value="card">Карта / банк</option>
+        <option value="cash">Наличные</option>
+      </select></label>
+      <label>Комиссия с приёма, %<input name="feePct" inputmode="decimal" placeholder="0"></label>
+    </div>
+    <p id="walletError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Добавить</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

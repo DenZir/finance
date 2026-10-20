@@ -102,6 +102,21 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .ads-bar-b { display: flex; flex-wrap: wrap; gap: 6px; }
 .ads-bar .btn { padding: 6px 10px; }
 .vpn-hint { margin: -6px 0 6px; }
+
+.wdeal { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel2); }
+.wdeal + .wdeal { margin-top: 10px; }
+.wdeal.stopped { opacity: .7; }
+.wd-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.wd-h b { font-weight: 600; }
+.wd-acts { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+.wd-acts .btn { padding: 6px 10px; }
+.wd-sum { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.wd-sum .owed { color: var(--warn); }
+.wdeal .deal { padding: 8px 0; }
+.wdeal details { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.wdeal summary { cursor: pointer; }
+.wdeal details .deal { opacity: .8; }
+.dlg-f .sp { flex: 1; }
 .btn:disabled { opacity: .5; cursor: default; }
 
 .dlg { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }

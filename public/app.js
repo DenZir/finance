@@ -15,7 +15,11 @@ let year = Number(month.slice(0, 4));
 let opKind = 'income';
 let deals = [];
 let adsAll = false;
-let payRef = null;
+// что оплачивается в окне «Оплачено»: сделка рекламы или фиксация приветки
+let payTarget = null;
+let welcomeRows = [];
+let welcomeEdit = null; // размещение в окне правки; null — новое
+let fixDealId = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
 let vpnRows = []; // оплаты VPN без платёжки
 let vpnPicked = new Set();
@@ -133,7 +137,7 @@ function renderTiles(report) {
       ? tile(`Должен партнёру · ${esc(vpn.name)}`, rub(Math.max(vpn.owed, 0)), vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода и расходов`, vpn.owed > 0 ? 'warn' : '')
       : tile('Должен партнёру', '—', 'нет проектов с партнёром')) +
     tile(period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad') +
-    tile('Нам должны', rub(S.ads.owedToUs), S.ads.owedToUsCount ? `ждём оплату за продажи: ${S.ads.owedToUsCount}` : 'никто не должен', S.ads.owedToUs ? 'warn' : '') +
+    tile('Нам должны', rub(S.ads.owedToUs + S.welcome.owed), [S.ads.owedToUsCount ? `реклама: ${S.ads.owedToUsCount}` : '', S.welcome.count ? `приветка: ${S.welcome.count}` : ''].filter(Boolean).join(' · ') || 'никто не должен', S.ads.owedToUs + S.welcome.owed ? 'warn' : '') +
     tile('Мы должны', rub(S.ads.weOwe), S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны', S.ads.weOwe ? 'warn' : '');
 }
 
@@ -221,6 +225,97 @@ function syncPick() {
   $('#adsPicked').innerHTML = `<b>Выбрано ${list.length}</b> · ${money}${noSum ? ` <span class="muted">· без суммы: ${noSum}</span>` : ''}`;
 }
 
+// --- приветка: ссылка покупателя в приветке, оплата за заявки ----------------------
+const isoDay = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many);
+const reqs = (n) => `${n.toLocaleString('ru-RU')} ${plural(n, 'заявка', 'заявки', 'заявок')}`;
+
+function fixLine(d, f, last) {
+  const sum = f.amount ? `<span class="plus">+${rub(f.amount)}</span>` : '<span class="muted">0 ₽</span>';
+  const acts = f.paid
+    ? `<span class="chip">${f.amount ? 'оплачено' : 'новых нет'}</span>`
+    : `<button class="btn primary" type="button" data-wpay="${f.id}">Оплачено</button>`;
+  const del = last && !(f.paid && f.amount) ? `<button class="btn ghost" type="button" data-wfixdel="${f.id}" title="Удалить фиксацию">×</button>` : '';
+  return `<div class="deal"><span class="when">${isoDay(f.onDate)}</span>
+    <div class="what"><b>+${reqs(f.count)}</b><small>всего ${f.total.toLocaleString('ru-RU')}</small></div>
+    <div class="sum">${sum}</div><div class="acts">${acts}${del}</div></div>`;
+}
+
+function renderWelcome() {
+  if (!welcomeRows.length) {
+    $('#welcome').innerHTML = '<div class="empty">Размещений нет. Поставили чью-то ссылку в приветку — добавьте: кто и цена за заявку. Когда он пришлёт число заявок, нажмите «Зафиксировать».</div>';
+    return;
+  }
+  $('#welcome').innerHTML = welcomeRows
+    .map((d) => {
+      const lastId = d.fixes.length ? d.fixes[d.fixes.length - 1].id : null;
+      const open = d.fixes.filter((f) => !f.paid);
+      const done = d.fixes.filter((f) => f.paid);
+      const state = d.stoppedOn ? `<span class="chip warn">остановлено ${isoDay(d.stoppedOn)}</span>` : `<span class="chip">идёт с ${isoDay(d.startedOn)}</span>`;
+      return `<div class="wdeal${d.stoppedOn ? ' stopped' : ''}">
+        <div class="wd-h"><b>${esc(d.contact)}</b><span class="chip">${rub(d.price)} за заявку</span>${state}
+          <div class="wd-acts"><button class="btn primary" type="button" data-wfix="${d.id}">Зафиксировать</button><button class="btn" type="button" data-wstop="${d.id}">${d.stoppedOn ? 'Возобновить' : 'Остановить'}</button><button class="btn ghost" type="button" data-wedit="${d.id}" aria-label="Изменить">✎</button></div></div>
+        <div class="wd-sum">${d.fixes.length ? `заявок всего ${d.total.toLocaleString('ru-RU')} · начислено ${rub(d.accrued)} · оплачено ${rub(d.paidSum)}${d.owed ? ` · <span class="owed">должен ${rub(d.owed)}</span>` : ''}` : 'фиксаций ещё не было'}${d.note ? ` · ${esc(d.note)}` : ''}</div>
+        ${open.map((f) => fixLine(d, f, f.id === lastId)).join('')}
+        ${done.length ? `<details><summary>Оплаченные фиксации · ${done.length}</summary>${done.map((f) => fixLine(d, f, f.id === lastId)).join('')}</details>` : ''}
+      </div>`;
+    })
+    .join('');
+}
+
+function openWelcome(deal) {
+  welcomeEdit = deal ?? null;
+  const f = $('#welcomeForm');
+  f.reset();
+  $('#welcomeError').hidden = true;
+  $('#welcomeTitle').textContent = deal ? 'Размещение в приветке' : 'Ссылка в приветке';
+  f.contact.value = deal?.contact ?? '';
+  f.price.value = deal ? String(deal.price / MICRO).replace('.', ',') : '';
+  f.startedOn.value = deal?.startedOn ?? todayIso();
+  f.startedOn.disabled = !!deal;
+  f.note.value = deal?.note ?? '';
+  $('#welcomeDel').hidden = !deal;
+  $('#welcomeDlg').showModal();
+}
+
+function openFix(deal) {
+  fixDealId = deal.id;
+  const f = $('#fixForm');
+  f.reset();
+  $('#fixError').hidden = true;
+  $('#fixDeal').textContent = `${deal.contact} · ${rub(deal.price)} за заявку${deal.fixes.length ? ` · в прошлый раз всего ${deal.total.toLocaleString('ru-RU')}` : ''}`;
+  f.onDate.value = todayIso();
+  syncFix();
+  $('#fixDlg').showModal();
+  f.total.focus();
+}
+
+// сколько новых и на какую сумму — пока владелец печатает число
+function syncFix() {
+  const d = welcomeRows.find((x) => x.id === fixDealId);
+  const total = Number(String($('#fixForm').total.value).replace(/\s/g, ''));
+  if (!d || !Number.isInteger(total) || $('#fixForm').total.value === '') {
+    $('#fixCalc').textContent = 'Число, которое прислал покупатель, — всего с начала размещения. Долг посчитается за новые.';
+    return;
+  }
+  const n = total - d.total;
+  $('#fixCalc').textContent = n < 0 ? `меньше прошлого (${d.total}) — так не бывает` : `новых ${reqs(n)} × ${rub(d.price)} = ${rub(n * d.price)}`;
+}
+
+function openFixPay(fixId) {
+  const d = welcomeRows.find((x) => x.fixes.some((f) => f.id === fixId));
+  const f = d?.fixes.find((x) => x.id === fixId);
+  if (!f) return;
+  showPay({
+    title: 'Приветка оплачена',
+    desc: `${d.contact} · ${reqs(f.count)} на ${isoDay(f.onDate)} · ${rub(f.amount)}`,
+    amount: f.amount,
+    amountLabel: 'Сколько пришло',
+    hint: 'Доход «Заявки с приветки», без комиссии. Сумма пересчитана по курсу — впишите, сколько пришло на самом деле.',
+    url: `/api/welcome-fix/${fixId}/pay`,
+  });
+}
+
 // --- VPN: оплаты без платёжки ----------------------------------------------------
 // как их называет VPN-бот → кнопка и кошелёк (роль vpn:<имя>)
 const VPN_PROVIDERS = [
@@ -283,18 +378,29 @@ async function resolveVpn(refs, action, buttons) {
 function openPay(ref) {
   const d = deals.find((x) => x.ref === ref);
   if (!d) return;
-  payRef = ref;
+  showPay({
+    title: d.kind === 'sale' ? 'Продажа оплачена' : 'Закуп оплачен',
+    desc: `${dealDay(d.date)} · ${dealTitle(d)} · ${[d.contact, d.channels].filter(Boolean).join(' · ')}${d.amount != null ? ` · ${rub(d.amount)}` : ''}`,
+    amount: d.amount,
+    amountLabel: d.kind === 'sale' ? 'Сколько пришло' : 'Сколько ушло',
+    hint: d.kind === 'sale'
+      ? 'Доход «Реклама», без комиссии. Сумма сделки пересчитана по курсу — впишите, сколько пришло на самом деле (при взаимозачёте — разницу).'
+      : 'Расход «Закуп рекламы» с этого кошелька, без комиссии.',
+    url: `/api/ad-deals/${encodeURIComponent(ref)}/pay`,
+  });
+}
+
+function showPay(target) {
+  payTarget = target;
   const f = $('#payForm');
   f.reset();
   $('#payError').hidden = true;
-  $('#payTitle').textContent = d.kind === 'sale' ? 'Продажа оплачена' : 'Закуп оплачен';
-  $('#payDeal').textContent = `${dealDay(d.date)} · ${dealTitle(d)} · ${[d.contact, d.channels].filter(Boolean).join(' · ')}${d.amount != null ? ` · ${rub(d.amount)}` : ''}`;
+  $('#payTitle').textContent = target.title;
+  $('#payDeal').textContent = target.desc;
   f.walletId.innerHTML = adWallets().map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
   f.date.value = todayIso();
-  $('#payAmountLabel').firstChild.textContent = d.kind === 'sale' ? 'Сколько пришло' : 'Сколько ушло';
-  $('#payHint').textContent = d.kind === 'sale'
-    ? 'Доход «Реклама», без комиссии. Сумма сделки пересчитана по курсу — впишите, сколько пришло на самом деле (при взаимозачёте — разницу).'
-    : 'Расход «Закуп рекламы» с этого кошелька, без комиссии.';
+  $('#payAmountLabel').firstChild.textContent = target.amountLabel;
+  $('#payHint').textContent = target.hint;
   syncPay();
   $('#payDlg').showModal();
 }
@@ -310,11 +416,11 @@ const adWallets = () =>
 // сумма сделки — в рублях; на кошелёк в другой валюте подставляем по курсу
 function syncPay() {
   const f = $('#payForm');
-  const d = deals.find((x) => x.ref === payRef);
+  const amount = payTarget?.amount;
   const w = S.wallets.find((x) => String(x.id) === f.walletId.value);
   f.querySelector('[data-pay-rate]').hidden = !w || w.currency === 'RUB';
-  if (!d || d.amount == null || !w) return;
-  const v = w.currency === 'RUB' ? d.amount / MICRO : w.rate ? Math.round((d.amount / MICRO / w.rate) * 100) / 100 : '';
+  if (amount == null || !w) return;
+  const v = w.currency === 'RUB' ? amount / MICRO : w.rate ? Math.round((amount / MICRO / w.rate) * 100) / 100 : '';
   f.amount.value = v === '' ? '' : String(v).replace('.', ',');
 }
 
@@ -401,7 +507,7 @@ async function load() {
   ]);
   S = state;
   deals = ads;
-  vpnRows = await api('/api/vpn/unsorted');
+  [vpnRows, welcomeRows] = await Promise.all([api('/api/vpn/unsorted'), api('/api/welcome')]);
   $('#login').hidden = true;
   $('#app').hidden = false;
   if (location.search) history.replaceState(null, '', '/');
@@ -416,6 +522,7 @@ async function load() {
   $('#reportTitle').textContent = byYear ? 'Итоги года' : 'Итоги месяца';
   renderTiles(byYear ? report.total : report);
   renderAds();
+  renderWelcome();
   renderVpn();
   renderWallets();
   $('#report').innerHTML = byYear ? yearHtml(report) : reportHtml(report);
@@ -577,6 +684,69 @@ $('#adsBar').addEventListener('click', async (e) => {
     for (const x of buttons) x.disabled = false;
   }
 });
+$('#addWelcome').addEventListener('click', () => openWelcome(null));
+$('#welcome').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const byId = (id) => welcomeRows.find((x) => x.id === Number(id));
+  try {
+    if (b.dataset.wfix) openFix(byId(b.dataset.wfix));
+    else if (b.dataset.wedit) openWelcome(byId(b.dataset.wedit));
+    else if (b.dataset.wpay) openFixPay(Number(b.dataset.wpay));
+    else if (b.dataset.wstop) {
+      const d = byId(b.dataset.wstop);
+      await api(`/api/welcome/${d.id}`, { method: 'PATCH', body: JSON.stringify({ stoppedOn: d.stoppedOn ? null : todayIso() }) });
+      await load();
+      toast(d.stoppedOn ? 'Размещение снова идёт' : 'Остановлено — уберите ссылку из приветки');
+    } else if (b.dataset.wfixdel) {
+      if (!confirm('Удалить фиксацию? Долг по ней пропадёт.')) return;
+      await api(`/api/welcome-fix/${b.dataset.wfixdel}`, { method: 'DELETE' });
+      await load();
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('#welcomeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  try {
+    if (welcomeEdit) await api(`/api/welcome/${welcomeEdit.id}`, { method: 'PATCH', body: JSON.stringify({ contact: f.contact, price: f.price, note: f.note }) });
+    else await api('/api/welcome', { method: 'POST', body: JSON.stringify(f) });
+    $('#welcomeDlg').close();
+    await load();
+    toast(welcomeEdit ? 'Сохранено' : 'Размещение добавлено');
+  } catch (err) {
+    $('#welcomeError').textContent = err.message;
+    $('#welcomeError').hidden = false;
+  }
+});
+$('#welcomeDel').addEventListener('click', async () => {
+  if (!welcomeEdit || !confirm(`Удалить размещение «${welcomeEdit.contact}» вместе с фиксациями?`)) return;
+  try {
+    await api(`/api/welcome/${welcomeEdit.id}`, { method: 'DELETE' });
+    $('#welcomeDlg').close();
+    await load();
+  } catch (err) {
+    $('#welcomeError').textContent = err.message;
+    $('#welcomeError').hidden = false;
+  }
+});
+$('#fixForm').addEventListener('input', syncFix);
+$('#fixForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  try {
+    const r = await api(`/api/welcome/${fixDealId}/fix`, { method: 'POST', body: JSON.stringify(f) });
+    $('#fixDlg').close();
+    await load();
+    toast(r.count ? `Зафиксировано: ${reqs(r.count)}, ${rub(r.amount)} — в «Нам должны»` : 'Новых заявок нет');
+  } catch (err) {
+    $('#fixError').textContent = err.message;
+    $('#fixError').hidden = false;
+  }
+});
+
 $('#vpn').addEventListener('change', (e) => {
   if (e.target.closest('[data-vpick-all]')) for (const x of document.querySelectorAll('[data-vpick]')) x.checked = e.target.checked;
   else if (!e.target.closest('[data-vpick]')) return;
@@ -609,7 +779,7 @@ $('#payForm').addEventListener('submit', async (e) => {
   const [y, m, d] = String(f.date || todayIso()).split('-').map(Number);
   const at = Date.UTC(y, m - 1, d, 12) - MSK;
   try {
-    await api(`/api/ad-deals/${encodeURIComponent(payRef)}/pay`, { method: 'POST', body: JSON.stringify({ ...f, at }) });
+    await api(payTarget.url, { method: 'POST', body: JSON.stringify({ ...f, at }) });
     $('#payDlg').close();
     await load();
     toast('Записано');

@@ -46,6 +46,11 @@
       </div>
     </section>
 
+    <section class="card" id="welcomeCard">
+      <div class="card-h"><h2>Приветка</h2><button class="btn" id="addWelcome" type="button">+ Размещение</button></div>
+      <div id="welcome"></div>
+    </section>
+
     <section class="card" id="vpnCard" hidden>
       <div class="card-h"><h2>VPN — разобрать</h2></div>
       <p class="hint vpn-hint">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией.</p>
@@ -111,6 +116,35 @@
     <p id="payHint" class="hint"></p>
     <p id="payError" class="err" hidden></p>
     <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Записать</button></div>
+  </form>
+</dialog>
+
+<dialog id="welcomeDlg" class="dlg">
+  <form id="welcomeForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3 id="welcomeTitle">Ссылка в приветке</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="fields">
+      <label class="wide">Кто покупатель<input name="contact" required maxlength="100" placeholder="Иван (@ivan)"></label>
+      <label>Цена за заявку, ₽<input name="price" inputmode="decimal" required placeholder="5"></label>
+      <label>С какого дня<input type="date" name="startedOn" required></label>
+      <label class="wide">Заметка<input name="note" maxlength="500" placeholder="необязательно"></label>
+    </div>
+    <p class="hint">Цена меняется для следующих фиксаций — прошлые посчитаны по старой.</p>
+    <p id="welcomeError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn danger" type="button" id="welcomeDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<dialog id="fixDlg" class="dlg">
+  <form id="fixForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Зафиксировать заявки</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p id="fixDeal" class="muted pay-deal"></p>
+    <div class="fields">
+      <label>Заявок всего, с начала<input name="total" inputmode="numeric" required placeholder="340"></label>
+      <label>Дата<input type="date" name="onDate" required></label>
+    </div>
+    <p id="fixCalc" class="hint"></p>
+    <p id="fixError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Зафиксировать</button></div>
   </form>
 </dialog>
 

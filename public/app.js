@@ -237,6 +237,21 @@ const MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', '
 const DOW = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 // mode: income — доход; expense — расходы и потери при выводе; net — доход за вычетом
 // комиссий и расходов, по проектам (у расхода свой вид, у дохода свой — общий только проект)
+// Крупные экраны увеличены через CSS zoom (style.css): холст графика рисуется в пикселях
+// страницы — без поправки он мылится, а точку мыши Chart.js получает в экранных
+// пикселях — подсказка открывалась у соседнего дня. Повтор события после update()
+// приходит уже исправленным.
+const pageZoom = () => parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+if (window.Chart) Chart.register({
+  id: 'pageZoomFix',
+  beforeEvent(chart, args) {
+    const z = pageZoom(), e = args.event;
+    if (z === 1 || args.replay || e.x == null) return;
+    e.x /= z; e.y /= z;
+    const a = chart.chartArea;
+    args.inChartArea = e.x >= a.left && e.x <= a.right && e.y >= a.top && e.y <= a.bottom;
+  },
+});
 const inc = { mode: 'income', by: 'cat', net: false, vpn: 'all', off: new Set(), open: new Set(), allDays: false };
 let incChart = null;
 // потери при выводе и обмене: у перевода нет ни вида, ни проекта
@@ -373,6 +388,7 @@ function drawIncomeChart(keys, shown, val) {
   const fmtRub = (v) => `${v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('ru-RU')} ₽`;
   const opts = {
     responsive: true,
+    devicePixelRatio: (window.devicePixelRatio || 1) * pageZoom(),
     maintainAspectRatio: false,
     animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { duration: 400 },
     interaction: { mode: 'index', intersect: false },

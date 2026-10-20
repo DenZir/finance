@@ -3,7 +3,14 @@
   --accent: #57b6ff; --good: #3ccf91; --bad: #ff6b6b; --warn: #f5b84b; --violet: #9b8cff;
   --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: dark;
+  --z: 1;
 }
+/* Крупные экраны — как в tg-analytics: окно от 1200 px по высоте (2560×1440, 3440×1440,
+   32:9 5120×1440, 4K) всё крупнее, иначе текст мелкий. Порог — высота: у 32:9
+   3840×1080 пиксели крупные, как у Full HD. zoom увеличивает и единицы окна (vw, vh),
+   поэтому они делятся на --z. */
+@media (min-width: 2200px) and (min-height: 1200px) { :root { zoom: 1.2; --z: 1.2; } }
+@media (min-width: 2900px) and (min-height: 1800px) { :root { zoom: 1.5; --z: 1.5; } }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--body); }
 [hidden] { display: none !important; }
@@ -16,14 +23,34 @@ button, input, select { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--accent); color: #0b0f14; font-weight: 800; }
 
-.login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.login { min-height: calc(100vh / var(--z)); display: grid; place-items: center; padding: 16px; }
 .login-card { width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; display: grid; gap: 14px; }
 .login-card p { margin: 0; }
 
-.top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: rgba(11,15,20,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+/* ширина колонок — от ширины страницы в её пикселях (с учётом zoom), поэтому контейнер, а не @media */
+#app { container-type: inline-size; }
+.top, .wrap { --maxw: 1080px; }
+/* шапка — по краям колонки содержимого, а не экрана */
+.top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px max(16px, calc((100% - var(--maxw)) / 2 + 16px)); background: rgba(11,15,20,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
 .month { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .month span { min-width: 118px; text-align: center; }
-.wrap { max-width: 1080px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.col { display: contents; }
+#incomeCard { order: 1; } #adsCard { order: 2; } #welcomeCard { order: 3; } #recurringCard { order: 4; }
+#vpnCard { order: 5; } #walletsCard { order: 6; } #reportCard { order: 7; } #opsCard { order: 8; }
+/* Широко: доход и итоги слева, то, что ждёт действия, — справа; кошельки и операции —
+   под доходом (две колонки) или своей колонкой (три). Колонки независимы по высоте. */
+@container (min-width: 1500px) {
+  .top, .wrap { --maxw: 1800px; }
+  .wrap { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-areas: "t t" "a b" "c b"; grid-template-rows: auto auto 1fr; align-items: start; }
+  .wrap > .tiles { grid-area: t; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .col-a { grid-area: a; } .col-b { grid-area: b; } .col-c { grid-area: c; }
+}
+@container (min-width: 2400px) {
+  .top, .wrap { --maxw: 3600px; }
+  .wrap { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "t t t" "a b c"; grid-template-rows: auto auto; }
+}
 
 .btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 10px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
 .btn:hover { border-color: var(--accent); }
@@ -126,7 +153,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .deal .sum small { display: block; color: var(--muted); font-size: 11.5px; }
 
 /* виды и проекты */
-.dlg.dlg-wide { width: min(560px, calc(100vw - 32px)); }
+.dlg.dlg-wide { width: min(560px, calc(100vw / var(--z) - 32px)); }
 .cat-wrap { padding: 16px; }
 .cat-hint { margin: -6px 0 10px; }
 .cat-sec h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
@@ -159,7 +186,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .inc-chip .p { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
 .inc-chip.off { opacity: .45; }
 .inc-chip.off i { background: transparent !important; outline: 1.5px solid var(--dim); }
-.inc-chart { position: relative; height: clamp(200px, 30vh, 320px); margin: 4px 0 12px; }
+.inc-chart { position: relative; height: clamp(200px, calc(30vh / var(--z)), 320px); margin: 4px 0 12px; }
 .inc-fallback { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 12.5px; text-align: center; padding: 0 16px; }
 .iday { display: grid; grid-template-columns: 74px 1fr auto; gap: 10px; align-items: center; width: 100%; padding: 8px 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); cursor: pointer; text-align: left; }
 .iday:hover { background: rgba(255,255,255,.02); }
@@ -177,7 +204,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .inc-more { margin-top: 6px; }
 .btn:disabled { opacity: .5; cursor: default; }
 
-.dlg { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }
+.dlg { width: min(460px, calc(100vw / var(--z) - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }
 .dlg::backdrop { background: rgba(0,0,0,.6); }
 .dlg form { padding: 16px; }
 .dlg-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -192,7 +219,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .fields input, .fields select { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; color: var(--text); }
 .fields input:focus, .fields select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; z-index: 20; max-width: calc(100vw - 32px); }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; z-index: 20; max-width: calc(100vw / var(--z) - 32px); }
 
 @media (max-width: 760px) {
   .tiles { grid-template-columns: 1fr 1fr; }

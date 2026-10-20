@@ -33,79 +33,80 @@
   <main class="wrap">
     <section class="tiles" id="tiles"></section>
 
-    <section class="card" id="incomeCard">
-      <div class="card-h inc-h"><h2 id="incomeTitle">Доход</h2>
-        <div class="inc-ctl">
-          <div class="seg mini" id="incMode" role="group" aria-label="Что показать"><button type="button" data-mode="income" class="on">Доход</button><button type="button" data-mode="expense">Расход</button><button type="button" data-mode="net">Чистыми</button></div>
-          <div class="seg mini" id="incBy" role="group" aria-label="Источники"><button type="button" data-by="cat" class="on">По виду</button><button type="button" data-by="proj">По проекту</button></div>
-          <div class="seg mini" id="incNet" role="group" aria-label="Суммы"><button type="button" data-net="0" class="on">До комиссий</button><button type="button" data-net="1">Чистыми</button></div>
-          <div class="seg mini" id="incVpn" role="group" aria-label="Проект с партнёром" hidden><button type="button" data-vpn="all" class="on">VPN целиком</button><button type="button" data-vpn="own">Ваша доля</button></div>
+    <!-- Колонки для широкого экрана; узко обёртки прозрачны (display: contents), и
+         карточки идут одним столбцом в прежнем порядке (order в style.css) -->
+    <div class="col col-a">
+      <section class="card" id="incomeCard">
+        <div class="card-h inc-h"><h2 id="incomeTitle">Доход</h2>
+          <div class="inc-ctl">
+            <div class="seg mini" id="incMode" role="group" aria-label="Что показать"><button type="button" data-mode="income" class="on">Доход</button><button type="button" data-mode="expense">Расход</button><button type="button" data-mode="net">Чистыми</button></div>
+            <div class="seg mini" id="incBy" role="group" aria-label="Источники"><button type="button" data-by="cat" class="on">По виду</button><button type="button" data-by="proj">По проекту</button></div>
+            <div class="seg mini" id="incNet" role="group" aria-label="Суммы"><button type="button" data-net="0" class="on">До комиссий</button><button type="button" data-net="1">Чистыми</button></div>
+            <div class="seg mini" id="incVpn" role="group" aria-label="Проект с партнёром" hidden><button type="button" data-vpn="all" class="on">VPN целиком</button><button type="button" data-vpn="own">Ваша доля</button></div>
+          </div>
         </div>
-      </div>
-      <div class="inc-total"><b id="incTotal"></b><span id="incSub"></span></div>
-      <div class="inc-share" id="incShare" aria-hidden="true"></div>
-      <div class="inc-chips" id="incChips"></div>
-      <div class="inc-chart"><canvas id="incChart" aria-label="Доход по дням"></canvas><div class="inc-fallback" id="incFallback" hidden>График не загрузился (Chart.js с cdnjs) — суммы по дням ниже</div></div>
-      <div id="incDays"></div>
-    </section>
-
-    <section class="card" id="adsCard" hidden>
-      <div class="card-h"><h2>Реклама</h2><button class="btn ghost" id="adsAll" type="button">Все сделки</button></div>
-      <div id="ads"></div>
-      <div class="ads-bar" id="adsBar" hidden>
-        <span id="adsPicked"></span>
-        <div class="ads-bar-b">
-          <button class="btn" type="button" data-bulk="waiting" title="Продажи — «Ждём оплату», закупы — «Надо оплатить»">Ждём оплату</button>
-          <button class="btn" type="button" data-bulk="barter">Бартер</button>
-          <button class="btn" type="button" data-bulk="unsort">Не разобрана</button>
-          <button class="btn ghost" type="button" data-bulk-clear>Снять выбор</button>
+        <div class="inc-total"><b id="incTotal"></b><span id="incSub"></span></div>
+        <div class="inc-share" id="incShare" aria-hidden="true"></div>
+        <div class="inc-chips" id="incChips"></div>
+        <div class="inc-chart"><canvas id="incChart" aria-label="Доход по дням"></canvas><div class="inc-fallback" id="incFallback" hidden>График не загрузился (Chart.js с cdnjs) — суммы по дням ниже</div></div>
+        <div id="incDays"></div>
+      </section>
+      <section class="card" id="reportCard">
+        <div class="card-h"><h2 id="reportTitle">Итоги месяца</h2>
+          <div class="seg mini" id="period" role="group" aria-label="Период">
+            <button type="button" data-period="month" class="on" aria-pressed="true">Месяц</button><button type="button" data-period="year" aria-pressed="false">Год</button>
+          </div>
         </div>
-      </div>
-    </section>
-
-    <section class="card" id="welcomeCard">
-      <div class="card-h"><h2>Приветка</h2><button class="btn" id="addWelcome" type="button">+ Размещение</button></div>
-      <div id="welcome"></div>
-    </section>
-
-    <section class="card" id="recurringCard">
-      <div class="card-h"><h2 id="recurringTitle">Регулярные расходы</h2><button class="btn" id="addRecurring" type="button">+ Расход</button></div>
-      <div class="wd-sum rec-sum" id="recurringSum"></div>
-      <div id="recurring"></div>
-    </section>
-
-    <section class="card" id="vpnCard" hidden>
-      <div class="card-h"><h2>VPN — разобрать</h2></div>
-      <p class="hint vpn-hint">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией.</p>
-      <div id="vpn"></div>
-      <div class="ads-bar" id="vpnBar" hidden>
-        <span id="vpnPicked"></span>
-        <div class="ads-bar-b">
-          <span id="vpnBulkProviders" class="ads-bar-b"></span>
-          <button class="btn" type="button" data-vbulk="skip" title="Тестовая оплата и т. п. — в доход не идёт">Не учитывать</button>
-          <button class="btn ghost" type="button" data-vbulk-clear>Снять выбор</button>
+        <div id="report"></div>
+      </section>
+    </div>
+    <div class="col col-b">
+      <section class="card" id="adsCard" hidden>
+        <div class="card-h"><h2>Реклама</h2><button class="btn ghost" id="adsAll" type="button">Все сделки</button></div>
+        <div id="ads"></div>
+        <div class="ads-bar" id="adsBar" hidden>
+          <span id="adsPicked"></span>
+          <div class="ads-bar-b">
+            <button class="btn" type="button" data-bulk="waiting" title="Продажи — «Ждём оплату», закупы — «Надо оплатить»">Ждём оплату</button>
+            <button class="btn" type="button" data-bulk="barter">Бартер</button>
+            <button class="btn" type="button" data-bulk="unsort">Не разобрана</button>
+            <button class="btn ghost" type="button" data-bulk-clear>Снять выбор</button>
+          </div>
         </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-h"><h2>Кошельки</h2><button class="btn" id="addWallet" type="button">+ Кошелёк</button></div>
-      <div id="wallets" class="wallets"></div>
-    </section>
-
-    <section class="card">
-      <div class="card-h"><h2 id="reportTitle">Итоги месяца</h2>
-        <div class="seg mini" id="period" role="group" aria-label="Период">
-          <button type="button" data-period="month" class="on" aria-pressed="true">Месяц</button><button type="button" data-period="year" aria-pressed="false">Год</button>
+      </section>
+      <section class="card" id="welcomeCard">
+        <div class="card-h"><h2>Приветка</h2><button class="btn" id="addWelcome" type="button">+ Размещение</button></div>
+        <div id="welcome"></div>
+      </section>
+      <section class="card" id="recurringCard">
+        <div class="card-h"><h2 id="recurringTitle">Регулярные расходы</h2><button class="btn" id="addRecurring" type="button">+ Расход</button></div>
+        <div class="wd-sum rec-sum" id="recurringSum"></div>
+        <div id="recurring"></div>
+      </section>
+      <section class="card" id="vpnCard" hidden>
+        <div class="card-h"><h2>VPN — разобрать</h2></div>
+        <p class="hint vpn-hint">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией.</p>
+        <div id="vpn"></div>
+        <div class="ads-bar" id="vpnBar" hidden>
+          <span id="vpnPicked"></span>
+          <div class="ads-bar-b">
+            <span id="vpnBulkProviders" class="ads-bar-b"></span>
+            <button class="btn" type="button" data-vbulk="skip" title="Тестовая оплата и т. п. — в доход не идёт">Не учитывать</button>
+            <button class="btn ghost" type="button" data-vbulk-clear>Снять выбор</button>
+          </div>
         </div>
-      </div>
-      <div id="report"></div>
-    </section>
-
-    <section class="card">
-      <div class="card-h"><h2>Операции</h2><button class="btn primary" id="addOp" type="button">+ Операция</button></div>
-      <div id="ops"></div>
-    </section>
+      </section>
+    </div>
+    <div class="col col-c">
+      <section class="card" id="walletsCard">
+        <div class="card-h"><h2>Кошельки</h2><button class="btn" id="addWallet" type="button">+ Кошелёк</button></div>
+        <div id="wallets" class="wallets"></div>
+      </section>
+      <section class="card" id="opsCard">
+        <div class="card-h"><h2>Операции</h2><button class="btn primary" id="addOp" type="button">+ Операция</button></div>
+        <div id="ops"></div>
+      </section>
+    </div>
   </main>
 </div>
 

@@ -12,7 +12,7 @@ import { SESSION_COOKIE, SESSION_MS, checkTelegramLogin, createSession, dropSess
 import { MoneyInputError, parseAmount, parsePct, parseRate } from './money.js';
 import {
   WALLET_KINDS, addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
-  listCategories, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet, yearReport,
+  incomeSeries, listCategories, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet, yearReport,
   type Wallet,
   type WalletKind,
 } from './ledger.js';
@@ -124,6 +124,18 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   app.get('/api/report', (req, res) => {
     const { from, to } = monthRange(String(req.query.month ?? ''));
     res.json(monthReport(db, from, to));
+  });
+
+  // Доход по дням месяца (?month=2026-10) или по месяцам года (?year=2026).
+  app.get('/api/income', (req, res) => {
+    if (req.query.year !== undefined) {
+      const year = Number(req.query.year);
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new MoneyInputError('год — от 2000 до 2100');
+      res.json(incomeSeries(db, monthRange(`${year}-01`).from, monthRange(`${year}-12`).to, 'month'));
+      return;
+    }
+    const { from, to } = monthRange(String(req.query.month ?? ''));
+    res.json(incomeSeries(db, from, to, 'day'));
   });
 
   app.get('/api/year', (req, res) => {

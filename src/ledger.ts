@@ -383,3 +383,32 @@ export function yearReport(db: Db, year: number): YearReport {
   const total = monthReport(db, monthRange(`${year}-01`).from, monthRange(`${year}-12`).to);
   return { year, months, total };
 }
+
+export interface IncomeBucket {
+  /** ГГГГ-ММ-ДД (по дням) или ГГГГ-ММ (по месяцам), по Москве */
+  key: string;
+  categoryId: number | null;
+  projectId: number | null;
+  /** ₽-микро до комиссии */
+  gross: number;
+  /** ₽-микро комиссии платёжки */
+  fee: number;
+}
+
+/**
+ * Доход периода по дням (или месяцам) × вид × проект — для графика и ленты
+ * дней. Страница сама складывает по виду или по проекту, до комиссий или
+ * чистыми, и считает долю владельца в проекте с партнёром.
+ */
+export function incomeSeries(db: Db, from: number, to: number, by: 'day' | 'month'): IncomeBucket[] {
+  // день по Москве: UTC+3 без перехода на летнее время
+  const fmt = by === 'day' ? '%Y-%m-%d' : '%Y-%m';
+  return db
+    .prepare(
+      `SELECT strftime('${fmt}', (at + 10800000) / 1000, 'unixepoch') AS key, category_id AS categoryId, project_id AS projectId,
+              SUM(gross_rub) AS gross, SUM(fee_rub) AS fee
+       FROM operations WHERE kind = 'income' AND at >= ? AND at < ?
+       GROUP BY key, category_id, project_id ORDER BY key`
+    )
+    .all(from, to) as IncomeBucket[];
+}

@@ -118,6 +118,37 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .wdeal summary { cursor: pointer; }
 .wdeal details .deal { opacity: .8; }
 .dlg-f .sp { flex: 1; }
+
+/* доход: итог, доли, график, лента дней */
+.inc-h { flex-wrap: wrap; }
+.inc-ctl { display: flex; flex-wrap: wrap; gap: 6px; }
+.inc-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.inc-total b { font: 600 28px/1.15 var(--mono); }
+.inc-total span { color: var(--muted); font-size: 12.5px; }
+.inc-share { display: flex; gap: 2px; height: 8px; margin: 10px 0 8px; border-radius: 4px; overflow: hidden; }
+.inc-share i { display: block; height: 100%; min-width: 2px; }
+.inc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.inc-chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--panel2); border-radius: 9px; padding: 5px 10px; cursor: pointer; color: var(--text); font-size: 12.5px; }
+.inc-chip i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.inc-chip .v { font-family: var(--mono); }
+.inc-chip .p { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.inc-chip.off { opacity: .45; }
+.inc-chip.off i { background: transparent !important; outline: 1.5px solid var(--dim); }
+.inc-chart { position: relative; height: clamp(200px, 30vh, 320px); margin: 4px 0 12px; }
+.inc-fallback { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 12.5px; text-align: center; padding: 0 16px; }
+.iday { display: grid; grid-template-columns: 74px 1fr auto; gap: 10px; align-items: center; width: 100%; padding: 8px 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); cursor: pointer; text-align: left; }
+.iday:hover { background: rgba(255,255,255,.02); }
+.iday .when { color: var(--muted); font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.iday b { font: 500 13.5px var(--mono); white-space: nowrap; }
+.iday.zero { cursor: default; }
+.iday.zero b { color: var(--dim); font-weight: 400; }
+.ibar { display: flex; gap: 2px; height: 10px; min-width: 0; }
+.ibar i { display: block; height: 100%; border-radius: 2px; min-width: 2px; }
+.iday-d { padding: 2px 2px 10px 84px; display: grid; gap: 4px; }
+.iday-d div { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.iday-d i { width: 10px; height: 10px; border-radius: 3px; }
+.iday-d span:last-child { font-family: var(--mono); }
+.inc-more { margin-top: 6px; }
 .btn:disabled { opacity: .5; cursor: default; }
 
 .dlg { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 0; }
@@ -151,4 +182,9 @@ tr.total td { font-weight: 600; border-bottom: 0; }
   .deal .acts { grid-column: 1 / -1; justify-content: flex-start; }
   .fields { grid-template-columns: 1fr; }
   .seg button { font-size: 12.5px; }
+  .inc-total b { font-size: 24px; }
+  .iday { grid-template-columns: 64px 1fr auto; gap: 8px; }
+  .iday .when { font-size: 11.5px; }
+  .iday-d { padding-left: 72px; }
+  .inc-ctl .seg.mini button { padding: 4px 9px; font-size: 12px; }
 }

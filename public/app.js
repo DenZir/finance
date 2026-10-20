@@ -18,6 +18,7 @@ let adsAll = false;
 // что оплачивается в окне «Оплачено»: сделка рекламы или фиксация приветки
 let payTarget = null;
 let welcomeRows = [];
+let incomeRows = [];
 let welcomeEdit = null; // размещение в окне правки; null — новое
 let fixDealId = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
@@ -223,6 +224,149 @@ function syncPick() {
   const noSum = list.filter((d) => d.amount == null).length;
   const money = [has('sale') ? `<span class="plus">+${rub(sum('sale'))}</span>` : '', has('buy') ? `<span class="minus">−${rub(sum('buy'))}</span>` : ''].filter(Boolean).join(' / ');
   $('#adsPicked').innerHTML = `<b>Выбрано ${list.length}</b> · ${money}${noSum ? ` <span class="muted">· без суммы: ${noSum}</span>` : ''}`;
+}
+
+// --- доход: итог, доли, график и лента дней ----------------------------------------
+// Цвет держится за источником, а не за местом в списке: вид или проект красится
+// своим цветом, что бы ни было выключено. Порядок и оттенки проверены на тёмном
+// фоне — различимы и при дальтонизме (валидатор палитры, соседние пары).
+const PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9'];
+const MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const DOW = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+const inc = { by: 'cat', net: false, vpn: 'all', off: new Set(), open: new Set(), allDays: false };
+let incChart = null;
+
+// источники: виды дохода или проекты; без вида / без проекта — в «Прочее»
+function incSources() {
+  const list = inc.by === 'cat' ? S.categories.filter((c) => c.kind === 'income') : S.projects;
+  return list.map((x, i) => ({ id: x.id, name: x.name, color: PALETTE[i % PALETTE.length] }));
+}
+
+// сумма строки с учётом переключателей: до комиссий / чистыми, VPN целиком / доля владельца
+function incAmount(r) {
+  let v = inc.net ? r.gross - r.fee : r.gross;
+  const p = S.projects.find((x) => x.id === r.projectId);
+  if (inc.vpn === 'own' && p?.partnerPct) v = (v * (100 - p.partnerPct)) / 100;
+  return v;
+}
+
+// ячейки периода: дни месяца по сегодняшний (по Москве) или месяцы года
+function incKeys() {
+  if (period === 'year') return Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  const [y, m] = month.split('-').map(Number);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return Array.from({ length: days }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+}
+const incLabel = (key) => (key.length === 7 ? MON_SHORT[Number(key.slice(5)) - 1] : `${key.slice(8)}.${key.slice(5, 7)}`);
+const incPast = (key) => key <= (key.length === 7 ? todayIso().slice(0, 7) : todayIso());
+
+function renderIncome() {
+  const sources = incSources();
+  const other = sources.find((s) => s.name === 'Прочее') ?? sources[sources.length - 1];
+  const srcOf = (r) => sources.find((s) => s.id === (inc.by === 'cat' ? r.categoryId : r.projectId)) ?? other;
+  const keys = incKeys();
+  // ячейка × источник
+  const cell = new Map();
+  for (const r of incomeRows) {
+    const k = `${r.key}|${srcOf(r).id}`;
+    cell.set(k, (cell.get(k) ?? 0) + incAmount(r));
+  }
+  const val = (key, s) => cell.get(`${key}|${s.id}`) ?? 0;
+  const sums = new Map(sources.map((s) => [s.id, keys.reduce((t, k) => t + val(k, s), 0)]));
+  const present = sources.filter((s) => sums.get(s.id) > 0);
+  const shown = present.filter((s) => !inc.off.has(s.id));
+  const total = shown.reduce((t, s) => t + sums.get(s.id), 0);
+
+  // VPN «целиком / ваша доля» — только если в периоде есть доход проекта с партнёром
+  $('#incVpn').hidden = !incomeRows.some((r) => S.projects.find((p) => p.id === r.projectId)?.partnerPct);
+  const [yy, mm] = month.split('-').map(Number);
+  const periodName = period === 'year' ? `за ${year} год` : `за ${new Date(Date.UTC(yy, mm - 1, 15)).toLocaleString('ru-RU', { month: 'long', timeZone: 'UTC' })}`;
+  $('#incomeTitle').textContent = `Доход ${periodName}`;
+  $('#incTotal').textContent = rub(total);
+  const passed = keys.filter(incPast).length;
+  $('#incSub').textContent = [inc.net ? 'чистыми, за вычетом комиссий' : 'до комиссий', passed ? `в среднем ${rub(total / passed)} ${period === 'year' ? 'в месяц' : 'в день'}` : ''].filter(Boolean).join(' · ');
+
+  $('#incShare').innerHTML = total ? shown.map((s) => `<i style="flex:${sums.get(s.id)};background:${s.color}"></i>`).join('') : '';
+  $('#incChips').innerHTML = present.length
+    ? present
+        .map((s) => {
+          const off = inc.off.has(s.id);
+          return `<button class="inc-chip${off ? ' off' : ''}" type="button" data-src="${s.id}" aria-pressed="${!off}" title="${off ? 'Показать' : 'Скрыть'}"><i style="background:${s.color}"></i><span>${esc(s.name)}</span><span class="v">${rub(sums.get(s.id))}</span>${!off && total ? `<span class="p">${Math.round((sums.get(s.id) / total) * 100)}%</span>` : ''}</button>`;
+        })
+        .join('')
+    : '<div class="empty">Дохода за этот период нет.</div>';
+
+  drawIncomeChart(keys, shown, val);
+
+  // лента: свежие сверху, только прошедшие дни; по умолчанию неделя
+  const past = keys.filter(incPast).reverse();
+  const dayTotal = (k) => shown.reduce((t, s) => t + val(k, s), 0);
+  const max = Math.max(1, ...past.map(dayTotal));
+  const limit = period === 'year' || inc.allDays ? past.length : 7;
+  $('#incDays').innerHTML =
+    past
+      .slice(0, limit)
+      .map((k) => {
+        const t = dayTotal(k);
+        const when = k.length === 7 ? MON_SHORT[Number(k.slice(5)) - 1] : `${incLabel(k)} ${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]}`;
+        const parts = shown.filter((s) => val(k, s) > 0);
+        const open = inc.open.has(k) && t > 0;
+        return `<button class="iday${t ? '' : ' zero'}" type="button" data-day="${k}" ${t ? `aria-expanded="${open}"` : 'tabindex="-1"'}>
+          <span class="when">${when}</span>
+          <span class="ibar" style="width:${(t / max) * 100}%">${parts.map((s) => `<i style="flex:${val(k, s)};background:${s.color}"></i>`).join('')}</span>
+          <b>${t ? rub(t) : '—'}</b></button>${open ? `<div class="iday-d">${[...parts].sort((a, b) => val(k, b) - val(k, a)).map((s) => `<div><i style="background:${s.color}"></i><span>${esc(s.name)}</span><span>${rub(val(k, s))}</span></div>`).join('')}</div>` : ''}`;
+      })
+      .join('') + (past.length > limit ? `<button class="btn ghost inc-more" type="button" data-alldays>Все дни месяца · ${past.length}</button>` : '');
+}
+
+function drawIncomeChart(keys, shown, val) {
+  if (!window.Chart) {
+    $('#incFallback').hidden = false;
+    return;
+  }
+  $('#incFallback').hidden = true;
+  const data = {
+    labels: keys.map(incLabel),
+    datasets: shown.map((s) => ({
+      label: s.name,
+      data: keys.map((k) => (incPast(k) ? Math.round(val(k, s) / 10_000) / 100 : null)),
+      backgroundColor: s.color,
+      // 2px зазор фоном между сегментами столбика
+      borderColor: '#121821',
+      borderWidth: { top: 2 },
+      borderSkipped: false,
+      borderRadius: 2,
+      barPercentage: 0.7,
+      categoryPercentage: 0.85,
+    })),
+  };
+  const fmtRub = (v) => `${Math.round(v).toLocaleString('ru-RU')} ₽`;
+  const opts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { duration: 400 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#0b0f14', borderColor: '#232d3a', borderWidth: 1, padding: 10, cornerRadius: 10,
+        titleColor: '#e6edf5', bodyColor: '#8b97a8', footerColor: '#e6edf5', usePointStyle: true, boxWidth: 8, boxHeight: 8,
+        filter: (c) => c.parsed.y > 0,
+        itemSort: (a, b) => b.parsed.y - a.parsed.y,
+        callbacks: {
+          label: (c) => ` ${fmtRub(c.parsed.y)} · ${c.dataset.label}`,
+          footer: (items) => `Всего ${fmtRub(items.reduce((t, c) => t + (c.parsed.y || 0), 0))}`,
+        },
+      },
+    },
+    scales: {
+      x: { stacked: true, grid: { display: false }, ticks: { color: '#5e6a7b', maxTicksLimit: 10, font: { size: 10 } } },
+      y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,.05)' }, border: { display: false },
+        ticks: { color: '#5e6a7b', maxTicksLimit: 5, font: { size: 10 }, callback: (v) => (v >= 1000 ? `${Math.round(v / 100) / 10}к` : v) } },
+    },
+  };
+  if (incChart) incChart.destroy();
+  incChart = new Chart($('#incChart'), { type: 'bar', data, options: opts });
 }
 
 // --- приветка: ссылка покупателя в приветке, оплата за заявки ----------------------
@@ -522,7 +666,11 @@ async function load() {
   ]);
   S = state;
   deals = ads;
-  [vpnRows, welcomeRows] = await Promise.all([api('/api/vpn/unsorted'), api('/api/welcome')]);
+  [vpnRows, welcomeRows, incomeRows] = await Promise.all([
+    api('/api/vpn/unsorted'),
+    api('/api/welcome'),
+    api(byYear ? `/api/income?year=${year}` : `/api/income?month=${month}`),
+  ]);
   $('#login').hidden = true;
   $('#app').hidden = false;
   if (location.search) history.replaceState(null, '', '/');
@@ -537,6 +685,7 @@ async function load() {
   $('#reportTitle').textContent = byYear ? 'Итоги года' : 'Итоги месяца';
   renderTiles(byYear ? report.total : report);
   renderAds();
+  renderIncome();
   renderWelcome();
   renderVpn();
   renderWallets();
@@ -699,6 +848,36 @@ $('#adsBar').addEventListener('click', async (e) => {
     for (const x of buttons) x.disabled = false;
   }
 });
+for (const [sel, key, parse] of [['#incBy', 'by', (v) => v], ['#incNet', 'net', (v) => v === '1'], ['#incVpn', 'vpn', (v) => v]]) {
+  $(sel).addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    inc[key] = parse(b.dataset[key]);
+    if (key === 'by') inc.off.clear(); // у видов и проектов свои id
+    for (const x of $(sel).children) x.classList.toggle('on', x === b);
+    renderIncome();
+  });
+}
+$('#incChips').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-src]');
+  if (!b) return;
+  const id = Number(b.dataset.src);
+  if (inc.off.has(id)) inc.off.delete(id);
+  else if ($('#incChips').querySelectorAll('.inc-chip:not(.off)').length > 1) inc.off.add(id); // хоть один источник остаётся
+  renderIncome();
+});
+$('#incDays').addEventListener('click', (e) => {
+  if (e.target.closest('[data-alldays]')) {
+    inc.allDays = true;
+    return renderIncome();
+  }
+  const d = e.target.closest('.iday:not(.zero)');
+  if (!d) return;
+  if (inc.open.has(d.dataset.day)) inc.open.delete(d.dataset.day);
+  else inc.open.add(d.dataset.day);
+  renderIncome();
+});
+
 $('#wallets').addEventListener('click', (e) => {
   if (e.target.closest('[data-partner]')) openPartner();
 });

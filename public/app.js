@@ -644,7 +644,7 @@ function payRecurringRow(id) {
 const VPN_PROVIDERS = [
   ['platega', 'Platega', 'Platega VPN'],
   ['cryptobot', 'CryptoBot', 'CryptoBot VPN'],
-  ['card_ru', 'Карта резерв', 'Карта резерв VPN'],
+  ['parity', 'Parity', 'Parity VPN'],
   ['lolzteam', 'Lolzteam', 'Lolzteam VPN'],
 ];
 const vpnButtons = (attr, ref) =>

@@ -56,7 +56,7 @@ test('оплаты VPN: платёжка из аналитики, разбор �
 
   // разбор руками
   assert.deepEqual(listUnsorted(db).map((p) => p.ref), ['4', '5']);
-  await assert.rejects(resolveVpn(db, ['4'], 'yookassa', deps.fetchRate, T), /Platega, CryptoBot, Карта резерв или Lolzteam/);
+  await assert.rejects(resolveVpn(db, ['4'], 'yookassa', deps.fetchRate, T), /Platega, CryptoBot, Parity или Lolzteam/);
   await assert.rejects(resolveVpn(db, ['x'], 'platega', deps.fetchRate, T), /не оплата/);
   assert.deepEqual(await resolveVpn(db, ['4', '2', '99'], 'platega', deps.fetchRate, T), { done: 1, skipped: 2 }, 'записанная и неизвестная пропущены');
   assert.deepEqual(await resolveVpn(db, ['5'], 'skip', deps.fetchRate, T), { done: 1, skipped: 0 });
@@ -80,21 +80,23 @@ test('оплаты VPN: платёжка из аналитики, разбор �
   assert.equal((await syncVpn(db2, deps, T)).booked, 1, 'со следующей сверкой — записана');
 });
 
-test('карта резерв (рубли) и Lolzteam (доллары): свои кабинеты VPN со своей комиссией, в том числе при разборе руками', async () => {
+test('Parity (рубли) и Lolzteam (доллары): свои кабинеты VPN со своей комиссией, в том числе при разборе руками', async () => {
   const db = openDb(':memory:');
   const deps = {
     fetchPayments: async (after: number) => ({
       more: false,
-      payments: [pay(1, 1000, 'card_ru'), pay(2, 1000, 'LOLZTEAM'), pay(3, 500, null)].filter((p) => p.id > after),
+      // card_ru — прежнее имя parity: такие оплаты ложатся на тот же кошелёк
+      payments: [pay(1, 1000, 'parity'), pay(2, 1000, 'LOLZTEAM'), pay(3, 500, null), pay(4, 1000, 'card_ru')].filter((p) => p.id > after),
     }),
     fetchRate: async () => 100,
     since: SINCE,
   };
-  assert.deepEqual(await syncVpn(db, deps, T), { imported: 3, booked: 2, unsorted: 1, waiting: [] });
+  assert.deepEqual(await syncVpn(db, deps, T), { imported: 4, booked: 3, unsorted: 1, waiting: [] });
   const w = (role: string) => listWallets(db).find((x) => x.role === role)!;
-  assert.equal(w('vpn:card_ru').currency, 'RUB');
+  assert.equal(w('vpn:parity').name, 'Parity VPN');
+  assert.equal(w('vpn:parity').currency, 'RUB');
   assert.equal(w('vpn:lolzteam').currency, 'USD');
-  assert.equal(balances(db).get(w('vpn:card_ru').id), rub(900), '1000 − 10 %');
+  assert.equal(balances(db).get(w('vpn:parity').id), rub(900 + 900), '1000 − 10 % дважды: parity и прежний card_ru');
   assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(9.3), '1000 ₽ = 10 $ по 100, − 7 %; регистр платёжки не важен');
   assert.deepEqual(await resolveVpn(db, ['3'], 'lolzteam', deps.fetchRate, T), { done: 1, skipped: 0 });
   assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(9.3 + 4.65));
@@ -115,4 +117,21 @@ test('Lolzteam с уже записанными рублёвыми оплата�
   db.prepare('INSERT INTO entries (op_id, wallet_id, amount, rub) VALUES (last_insert_rowid(), ?, ?, ?)').run(id, rub(300), rub(300));
   migrate(db);
   assert.equal(listWallets(db).find((x) => x.role === 'vpn:lolzteam')!.currency, 'RUB');
+});
+
+test('card_ru → parity: кошелёк «Карта резерв VPN» и прочитанные, но не записанные оплаты переходят на новое имя', async () => {
+  // база до обновления: кошелёк с ролью vpn:card_ru и оплата, прочитанная из
+  // аналитики с card_ru, но ещё не записанная (не было курса и т. п.)
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  const rename = MIGRATIONS.findIndex((m) => m.includes("role = 'vpn:parity'"));
+  for (const m of MIGRATIONS.slice(0, rename)) db.exec(m);
+  db.pragma(`user_version = ${rename}`);
+  const id = listWallets(db).find((x) => x.role === 'vpn:card_ru')!.id;
+  db.prepare("INSERT INTO vpn_payments (ref, at, type, amount, provider, synced_at) VALUES ('7', ?, 'payment', ?, 'card_ru', 1)").run(Date.parse('2026-10-10T10:00:00Z'), rub(1000));
+  migrate(db);
+  const w = listWallets(db).find((x) => x.id === id)!;
+  assert.deepEqual([w.role, w.name, w.feePct], ['vpn:parity', 'Parity VPN', 10]);
+  assert.deepEqual(await syncVpn(db, { fetchPayments: async () => ({ more: false, payments: [] }), fetchRate: async () => 100, since: SINCE }, T), { imported: 0, booked: 1, unsorted: 0, waiting: [] });
+  assert.equal(balances(db).get(id), rub(900), 'та же оплата — на тот же кошелёк, 1000 − 10 %');
 });

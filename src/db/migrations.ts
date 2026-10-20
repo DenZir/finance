@@ -270,4 +270,13 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (recurring_id, month)
   );
   `,
+  `
+  -- Платёжка «Карта резерв» у VPN-бота теперь называется parity (владелец,
+  -- 2026-10-20): кошелёк и уже прочитанные, но не записанные оплаты переходят
+  -- на новое имя. Название кошелька — только если его не переименовывали.
+  UPDATE wallets SET role = 'vpn:parity',
+    name = CASE WHEN name = 'Карта резерв VPN' THEN 'Parity VPN' ELSE name END
+  WHERE role = 'vpn:card_ru';
+  UPDATE vpn_payments SET provider = 'parity' WHERE provider = 'card_ru';
+  `,
 ];

@@ -4,7 +4,7 @@
  * VPN-бот — код партнёра, и обо всех его оплатах знает только аналитика: туда
  * бот сообщает каждую. Оплата становится доходом «VPN» проекта VPN (пополам с
  * партнёром) на кошелёк своей платёжки — Platega VPN (8 %), CryptoBot VPN
- * (3 %), Карта резерв VPN (10 %) или Lolzteam VPN (7 %), — с её комиссией. Какая платёжка, бот передаёт полем provider; не
+ * (3 %), Parity VPN (10 %) или Lolzteam VPN (7 %), — с её комиссией. Какая платёжка, бот передаёт полем provider; не
  * передал (старые оплаты, бот ещё не доработан) — оплата ждёт в «Разобрать»,
  * пока владелец не выберет платёжку сам.
  */
@@ -15,9 +15,17 @@ import { currentRate, type RateFetcher } from './rates.js';
 
 export const SOURCE = 'vpn';
 /** Как их называет VPN-бот в поле provider; кошелёк — с ролью vpn:<имя>. */
-export const PROVIDERS = ['platega', 'cryptobot', 'card_ru', 'lolzteam'] as const;
+export const PROVIDERS = ['platega', 'cryptobot', 'parity', 'lolzteam'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 const isProvider = (v: unknown): v is Provider => (PROVIDERS as readonly unknown[]).includes(v);
+// card_ru — прежнее имя parity (владелец, 2026-10-20): оплаты, ушедшие в аналитику
+// до переименования, ложатся на тот же кошелёк, а не в «Разобрать».
+const ALIASES: Record<string, Provider> = { card_ru: 'parity' };
+const providerOf = (v: unknown): Provider | null => {
+  if (typeof v !== 'string') return null;
+  const s = v.toLowerCase();
+  return isProvider(s) ? s : ALIASES[s] ?? null;
+};
 
 export interface AnalyticsPayment {
   id: number;
@@ -102,7 +110,7 @@ export async function syncVpn(
         after = Math.max(after, p.id);
         const at = Date.parse(p.at);
         if (!Number.isFinite(at) || at < deps.since || !(p.amount > 0)) continue;
-        const provider = typeof p.provider === 'string' && isProvider(p.provider.toLowerCase()) ? p.provider.toLowerCase() : null;
+        const provider = providerOf(p.provider);
         imported += insert.run(String(p.id), at, p.type === 'renewal' ? 'renewal' : 'payment', Math.round(p.amount * MICRO), provider, now).changes;
       }
       saveCursor(db, after);
@@ -156,7 +164,7 @@ export async function resolveVpn(
   fetchRate: RateFetcher,
   now = Date.now()
 ): Promise<{ done: number; skipped: number }> {
-  if (action !== 'skip' && !isProvider(action)) throw new MoneyInputError('выберите платёжку: Platega, CryptoBot, Карта резерв или Lolzteam');
+  if (action !== 'skip' && !isProvider(action)) throw new MoneyInputError('выберите платёжку: Platega, CryptoBot, Parity или Lolzteam');
   if (!Array.isArray(refs) || !refs.length) throw new MoneyInputError('не выбрано ни одной оплаты');
   if (refs.length > MAX_REFS) throw new MoneyInputError(`за раз — не больше ${MAX_REFS} оплат`);
   for (const r of refs) if (typeof r !== 'string' || !REF.test(r)) throw new MoneyInputError(`«${String(r).slice(0, 40)}» — не оплата`);

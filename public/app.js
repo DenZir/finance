@@ -1,4 +1,5 @@
-// Страница учёта: плашки, кошельки, итоги месяца или года, операции.
+// Страница учёта: разделы слева (на телефоне — снизу), как в tg-analytics; обзор —
+// плашки, доход, что ждёт действия, последние операции.
 // Суммы приходят в «микро» (миллионных долях единицы) — переводим только при показе.
 
 const $ = (s) => document.querySelector(s);
@@ -86,6 +87,7 @@ function focusDeal(ref) {
     toast('Этой сделки в «Деньгах» ещё нет — она подтянется из аналитики в течение 5 минут');
     return;
   }
+  showScreen('ads');
   // оплаченная, бартер и отменённая видны только во «Все сделки»
   if (!adsAll && !$(`#ads [data-deal="${CSS.escape(ref)}"]`)) {
     adsAll = true;
@@ -102,7 +104,47 @@ window.addEventListener('hashchange', () => {
   rememberDealLink();
   const ref = takeDealLink();
   if (ref && S) focusDeal(ref);
+  else showScreen(screenOfHash(), false);
 });
+
+// --- разделы: меню слева, на телефоне — снизу и «Ещё» -----------------------------
+// Раздел — в адресе (#ads), чтобы «Назад» в браузере и обновление страницы вели туда же.
+const SCREENS = {
+  overview: ['Обзор', 'Деньги проектов: доход, долги и что ждёт действия'],
+  ads: ['Реклама', 'Сделки из аналитики: оплачено, ждём оплату, бартер'],
+  welcome: ['Приветка', 'Чужие ссылки в приветке и оплата за заявки'],
+  recurring: ['Регулярные расходы', 'Серверы и подписки: в свой день бот присылает черновик'],
+  vpn: ['VPN — разобрать', 'Оплаты VPN, по которым бот не сказал платёжку'],
+  wallets: ['Кошельки', 'Платёжки, кабинеты VPN, крипта и карты'],
+  report: ['Итоги', 'Доходы, комиссии и расходы по видам — за месяц или год'],
+  ops: ['Операции', 'Всё, что записано: руками, ботом и импортом'],
+};
+const IN_MORE = ['welcome', 'vpn', 'wallets', 'report']; // на телефоне — в «Ещё»
+let screen = 'overview';
+const screenOfHash = () => (SCREENS[location.hash.slice(1)] ? location.hash.slice(1) : 'overview');
+
+function showScreen(name, push = true) {
+  if (!SCREENS[name]) name = 'overview';
+  const moved = name !== screen;
+  screen = name;
+  for (const s of document.querySelectorAll('.screen')) s.classList.toggle('active', s.id === `scr-${name}`);
+  for (const b of document.querySelectorAll('.nav-it[data-scr], .tab[data-scr]')) b.classList.toggle('on', b.dataset.scr === name);
+  $('[data-more]').classList.toggle('on', IN_MORE.includes(name));
+  $('#tbTitle').textContent = SCREENS[name][0];
+  $('#tbSub').textContent = SCREENS[name][1];
+  document.title = name === 'overview' ? 'Деньги' : `${SCREENS[name][0]} · Деньги`;
+  if (push && moved) history.pushState(null, '', name === 'overview' ? location.pathname : `#${name}`);
+  if (moved) scrollTo({ top: 0 });
+}
+window.addEventListener('popstate', () => showScreen(screenOfHash(), false));
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-scr]');
+  if (!b) return;
+  if ($('#moreDlg').open) $('#moreDlg').close();
+  showScreen(b.dataset.scr);
+});
+showScreen(screenOfHash(), false);
+$('#tbEyebrow').textContent = `${new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' })} · деньги`;
 
 // --- вход -----------------------------------------------------------------
 async function showLogin() {
@@ -130,18 +172,109 @@ async function showLogin() {
 // --- отрисовка -------------------------------------------------------------
 const nameOf = (list, id) => list.find((x) => x.id === id)?.name ?? '—';
 
+// значки и мини-график — как у плашек tg-analytics
+const ic = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const IC = {
+  card: ic('<rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/>'),
+  wallet: ic('<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M15.5 13.5h2"/>'),
+  users: ic('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.2 3.3-5 6.5-5s5.8 1.8 6.5 5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M17.8 15.3c2 .7 3.3 2.2 3.7 4.7"/>'),
+  rub: ic('<path d="M7 20h7M7 16h7M7 4h4.5a4 4 0 0 1 0 8H7V4zm0 0v16"/>'),
+  in: ic('<path d="M17 7 7 17M15 17H7V9"/>'),
+  out: ic('<path d="M7 17 17 7M9 7h8v8"/>'),
+  ads: ic('<path d="M3 10.5 17 5v13L3 12.5v-2z"/><path d="M7 13.5V18a2 2 0 0 0 4 0v-3"/>'),
+  welcome: ic('<path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/>'),
+  recurring: ic('<path d="M4 11a7 7 0 0 1 12-5l2 2"/><path d="M18 4v4h-4"/><path d="M20 13a7 7 0 0 1-12 5l-2-2"/><path d="M6 20v-4h4"/>'),
+  vpn: ic('<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6L12 3z"/>'),
+};
+const C = { blue: '#57B6FF', green: '#3DDC97', amber: '#FFB454', red: '#FF6B7A', violet: '#9B8CFF' };
+const hueBox = (c) => `background:${c}1f;color:${c};border:1px solid ${c}33`;
+function spark(vals, color) {
+  if (vals.length < 2) vals = [0, ...vals, 0].slice(-2);
+  const w = 92, h = 26, mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn || 1;
+  const d = vals.map((v, i) => `${i ? 'L' : 'M'}${((i / (vals.length - 1)) * w).toFixed(1)} ${(h - 3 - ((v - mn) / r) * (h - 7)).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${d} L ${w} ${h} L 0 ${h} Z" fill="${color}" opacity=".12"/><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+// чистыми нарастающим итогом по дням (за год — по месяцам), как в итогах
+function netSeries() {
+  const byKey = new Map();
+  for (const r of incomeRows) {
+    const v = r.kind === 'income' ? r.gross - r.fee : r.kind === 'expense' ? -r.gross : -r.fee;
+    byKey.set(r.key, (byKey.get(r.key) ?? 0) + v);
+  }
+  let acc = 0;
+  return incKeys().filter(incPast).map((k) => (acc += byKey.get(k) ?? 0));
+}
+
 function renderTiles(report) {
   const vpn = S.partners[0];
-  const tile = (label, value, sub, cls = '') => `<div class="tile ${cls}"><span>${label}</span><b>${value}</b><span>${sub}</span></div>`;
-  $('#tiles').innerHTML =
-    tile('На платёжках', rub(S.totals.onProviders), 'ещё не выведено') +
-    tile('На кошельках', rub(S.totals.onWallets), 'выведено и лежит') +
-    (vpn
-      ? tile(`Должен партнёру · ${esc(vpn.name)}`, rub(Math.max(vpn.owed, 0)), vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода и расходов`, vpn.owed > 0 ? 'warn' : '')
-      : tile('Должен партнёру', '—', 'нет проектов с партнёром')) +
-    tile(period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', rub(report.net), 'доход − комиссии − расходы', report.net >= 0 ? 'good' : 'bad') +
-    tile('Нам должны', rub(S.ads.owedToUs + S.welcome.owed), [S.ads.owedToUsCount ? `реклама: ${S.ads.owedToUsCount}` : '', S.welcome.count ? `приветка: ${S.welcome.count}` : ''].filter(Boolean).join(' · ') || 'никто не должен', S.ads.owedToUs + S.welcome.owed ? 'warn' : '') +
-    tile('Мы должны', rub(S.ads.weOwe), S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны', S.ads.weOwe ? 'warn' : '');
+  const all = S.totals.onProviders + S.totals.onWallets;
+  const share = (v) => (all > 0 ? Math.max(0, Math.min(100, (v / all) * 100)) : 0);
+  const count = (pred) => S.wallets.filter((w) => !w.archived && pred(w)).length;
+  const owedUs = S.ads.owedToUs + S.welcome.owed;
+  const tiles = [
+    { lbl: 'На платёжках', icon: IC.card, c: C.blue, val: rub(S.totals.onProviders), delta: '<span class="delta flat">не выведено</span>',
+      sub: `кабинетов: ${count((w) => w.kind === 'provider')}`, bar: share(S.totals.onProviders) },
+    { lbl: 'На кошельках', icon: IC.wallet, c: C.violet, val: rub(S.totals.onWallets), delta: '<span class="delta flat">выведено</span>',
+      sub: `кошельков: ${count((w) => w.kind !== 'provider')}`, bar: share(S.totals.onWallets) },
+    vpn
+      ? { lbl: `Должен партнёру · ${esc(vpn.name)}`, icon: IC.users, c: C.amber, val: rub(Math.max(vpn.owed, 0)), cls: vpn.owed > 0 ? 'warn' : '',
+          delta: vpn.owed < 0 ? '<span class="delta up">вам должны</span>' : `<span class="delta flat">${vpn.pct}%</span>`,
+          sub: vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода за вычетом комиссий и расходов` }
+      : { lbl: 'Должен партнёру', icon: IC.users, c: C.amber, val: '—', delta: '', sub: 'нет проектов с партнёром' },
+    { lbl: period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', icon: IC.rub, c: report.net >= 0 ? C.green : C.red, val: rub(report.net), cls: report.net >= 0 ? 'good' : 'bad',
+      delta: report.totalIncome ? `<span class="delta ${report.net >= 0 ? 'up' : 'dn'}">${Math.round((report.net / report.totalIncome) * 100)}% дохода</span>` : '<span class="delta flat">нет дохода</span>',
+      sub: 'доход − комиссии − расходы', spark: netSeries() },
+    { lbl: 'Нам должны', icon: IC.in, c: C.amber, val: rub(owedUs), cls: owedUs ? 'warn' : '',
+      delta: `<span class="delta ${owedUs ? 'warn' : 'flat'}">${S.ads.owedToUsCount + S.welcome.count || 'никто'}</span>`,
+      sub: [S.ads.owedToUsCount ? `реклама: ${S.ads.owedToUsCount}` : '', S.welcome.count ? `приветка: ${S.welcome.count}` : ''].filter(Boolean).join(' · ') || 'никто не должен' },
+    { lbl: 'Мы должны', icon: IC.out, c: C.red, val: rub(S.ads.weOwe), cls: S.ads.weOwe ? 'warn' : '',
+      delta: `<span class="delta ${S.ads.weOwe ? 'dn' : 'flat'}">${S.ads.weOweCount || 'никому'}</span>`,
+      sub: S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны' },
+  ];
+  $('#tiles').innerHTML = tiles
+    .map((k) => `<article class="card kpi">
+      <div class="kpi-top"><span class="kpi-ic" style="${hueBox(k.c)}">${k.icon}</span><span class="kpi-lbl">${k.lbl}</span>${k.delta}</div>
+      <div class="kpi-val ${k.cls ?? ''}">${k.val}</div>
+      <div class="kpi-sub">${k.sub}</div>
+      ${k.spark ? `<div class="kpi-spark">${spark(k.spark, k.c)}</div>` : k.bar != null ? `<div class="kpi-bar" title="доля всех денег"><i style="width:${k.bar}%;background:${k.c}"></i></div>` : ''}
+    </article>`)
+    .join('');
+}
+
+// «Что ждёт действия» на обзоре: каждая строка ведёт в свой раздел
+function renderTodo() {
+  const unsorted = deals.filter((d) => d.state === 'open' && !d.cancelled).length;
+  const due = recurringRows.filter((r) => r.active && r.state === 'due');
+  const vpnSum = vpnRows.reduce((s, p) => s + p.amount, 0);
+  const n = (k, one, few, many) => `${k} ${plural(k, one, few, many)}`;
+  const items = [
+    S.ads.owedToUsCount && ['ads', IC.in, C.green, 'Реклама — ждём оплату', n(S.ads.owedToUsCount, 'продажа', 'продажи', 'продаж'), `<span class="plus">+${rub(S.ads.owedToUs)}</span>`],
+    S.ads.weOweCount && ['ads', IC.out, C.red, 'Реклама — надо оплатить', n(S.ads.weOweCount, 'закуп', 'закупа', 'закупов'), `<span class="minus">−${rub(S.ads.weOwe)}</span>`],
+    unsorted && ['ads', IC.ads, C.blue, 'Сделки не разобраны', 'оплачено, ждём оплату или бартер', String(unsorted)],
+    S.welcome.count && ['welcome', IC.welcome, C.amber, 'Приветка — должны за заявки', n(S.welcome.count, 'фиксация', 'фиксации', 'фиксаций'), `<span class="plus">+${rub(S.welcome.owed)}</span>`],
+    due.length && ['recurring', IC.recurring, C.violet, 'Регулярные — ждут записи', due.slice(0, 3).map((r) => esc(r.name)).join(', ') + (due.length > 3 ? '…' : ''), `≈ ${rub(due.reduce((s, r) => s + (r.rubEstimate ?? 0), 0))}`],
+    vpnRows.length && ['vpn', IC.vpn, C.blue, 'VPN — без платёжки', n(vpnRows.length, 'оплата', 'оплаты', 'оплат'), `<span class="plus">+${rub(vpnSum)}</span>`],
+  ].filter(Boolean);
+  $('#todo').innerHTML = items.length
+    ? items.map(([scr, icon, c, title, sub, v]) => `<button class="todo-it" type="button" data-scr="${scr}"><span class="todo-ic" style="${hueBox(c)}">${icon}</span><span><b>${title}</b><small>${sub}</small></span><span class="v">${v}</span></button>`).join('')
+    : '<div class="todo-ok"><i></i>Всё разобрано — ничего не ждёт</div>';
+}
+
+// счётчики в меню: что ждёт оплаты или разбора
+function renderBadges() {
+  const n = {
+    ads: deals.filter((d) => (d.state === 'waiting' || d.state === 'open') && !d.cancelled).length,
+    welcome: S.welcome.count,
+    recurring: recurringRows.filter((r) => r.active && r.state === 'due').length,
+    vpn: vpnRows.length,
+  };
+  n.more = n.welcome + n.vpn;
+  for (const el of document.querySelectorAll('[data-nb]')) {
+    const v = n[el.dataset.nb] || 0;
+    el.hidden = !v;
+    el.textContent = v > 99 ? '99+' : String(v);
+  }
 }
 
 // --- реклама ------------------------------------------------------------------
@@ -169,9 +302,9 @@ function dealLine(d, group) {
   else if (d.state === 'barter') acts = `<span class="chip">бартер</span><button class="btn ghost" type="button" data-unbarter="${ref}">Вернуть</button>`;
   else if (d.cancelled) acts = `<span class="chip">отменена</span>${d.state === 'waiting' ? `<button class="btn ghost" type="button" data-unwait="${ref}">Не ждём</button>` : ''}`;
   else if (d.state === 'waiting')
-    acts = `<button class="btn primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-barter="${ref}">Бартер</button><button class="btn ghost" type="button" data-unwait="${ref}" title="Вернуть в неразобранные">×</button>`;
+    acts = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-barter="${ref}">Бартер</button><button class="btn ghost" type="button" data-unwait="${ref}" title="Вернуть в неразобранные">×</button>`;
   else
-    acts = `<button class="btn primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
+    acts = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
   const done = d.state === 'paid' || d.state === 'barter' || d.cancelled;
   const sub = [esc(d.contact), esc(d.channels), d.state === 'waiting' && !d.cancelled ? `<span class="age">${dealAge(d.date)}</span>` : ''].filter(Boolean).join(' · ');
   const when = !group
@@ -187,8 +320,11 @@ function dealLine(d, group) {
 function renderAds() {
   picked.clear();
   syncPick();
-  $('#adsCard').hidden = !deals.length;
-  if (!deals.length) return;
+  $('#adsAll').hidden = !deals.length;
+  if (!deals.length) {
+    $('#ads').innerHTML = '<div class="empty">Сделок рекламы пока нет — они приходят из аналитики раз в 5 минут.</div>';
+    return;
+  }
   $('#adsAll').textContent = adsAll ? 'Свернуть' : 'Все сделки';
   if (adsAll) {
     const all = [...deals].sort((a, b) => b.date.localeCompare(a.date));
@@ -377,7 +513,7 @@ function drawIncomeChart(keys, shown, val) {
       data: keys.map((k) => (incPast(k) ? Math.round(val(k, s) / 10_000) / 100 : null)),
       backgroundColor: s.color,
       // 2px зазор фоном между сегментами столбика; ниже нуля сегменты растут вниз
-      borderColor: '#121821',
+      borderColor: '#0f141b',
       borderWidth: (c) => (c.raw < 0 ? { bottom: 2 } : { top: 2 }),
       borderSkipped: false,
       borderRadius: 2,
@@ -395,8 +531,8 @@ function drawIncomeChart(keys, shown, val) {
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: '#0b0f14', borderColor: '#232d3a', borderWidth: 1, padding: 10, cornerRadius: 10,
-        titleColor: '#e6edf5', bodyColor: '#8b97a8', footerColor: '#e6edf5', usePointStyle: true, boxWidth: 8, boxHeight: 8,
+        backgroundColor: '#0F1520', borderColor: 'rgba(255,255,255,.12)', borderWidth: 1, padding: 12, cornerRadius: 10,
+        titleColor: '#E8EDF4', bodyColor: '#9AA5B8', footerColor: '#E8EDF4', bodyFont: { family: 'JetBrains Mono', size: 11 }, usePointStyle: true, boxWidth: 7, boxHeight: 7,
         filter: (c) => c.parsed.y !== 0,
         itemSort: (a, b) => b.parsed.y - a.parsed.y,
         callbacks: {
@@ -406,9 +542,9 @@ function drawIncomeChart(keys, shown, val) {
       },
     },
     scales: {
-      x: { stacked: true, grid: { display: false }, ticks: { color: '#5e6a7b', maxTicksLimit: 10, font: { size: 10 } } },
+      x: { stacked: true, grid: { display: false }, ticks: { color: '#5A6478', maxTicksLimit: 10, font: { family: 'JetBrains Mono', size: 10 } } },
       y: { stacked: true, beginAtZero: true, grid: { color: (c) => (c.tick.value === 0 ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.05)') }, border: { display: false },
-        ticks: { color: '#5e6a7b', maxTicksLimit: 5, font: { size: 10 }, callback: (v) => (Math.abs(v) >= 1000 ? `${v < 0 ? '−' : ''}${Math.round(Math.abs(v) / 100) / 10}к` : v < 0 ? `−${-v}` : v) } },
+        ticks: { color: '#5A6478', maxTicksLimit: 5, font: { family: 'JetBrains Mono', size: 10 }, callback: (v) => (Math.abs(v) >= 1000 ? `${v < 0 ? '−' : ''}${Math.round(Math.abs(v) / 100) / 10}к` : v < 0 ? `−${-v}` : v) } },
     },
   };
   if (incChart) incChart.destroy();
@@ -424,7 +560,7 @@ function fixLine(d, f, last) {
   const sum = f.amount ? `<span class="plus">+${rub(f.amount)}</span>` : '<span class="muted">0 ₽</span>';
   const acts = f.paid
     ? `<span class="chip">${f.amount ? 'оплачено' : 'новых нет'}</span>`
-    : `<button class="btn primary" type="button" data-wpay="${f.id}">Оплачено</button>`;
+    : `<button class="btn btn-primary" type="button" data-wpay="${f.id}">Оплачено</button>`;
   const del = last && !(f.paid && f.amount) ? `<button class="btn ghost" type="button" data-wfixdel="${f.id}" title="Удалить фиксацию">×</button>` : '';
   return `<div class="deal"><span class="when">${isoDay(f.onDate)}</span>
     <div class="what"><b>+${reqs(f.count)}</b><small>всего ${f.total.toLocaleString('ru-RU')}</small></div>
@@ -444,7 +580,7 @@ function renderWelcome() {
       const state = d.stoppedOn ? `<span class="chip warn">остановлено ${isoDay(d.stoppedOn)}</span>` : `<span class="chip">идёт с ${isoDay(d.startedOn)}</span>`;
       return `<div class="wdeal${d.stoppedOn ? ' stopped' : ''}">
         <div class="wd-h"><b>${esc(d.contact)}</b><span class="chip">${rub(d.price)} за заявку</span>${state}
-          <div class="wd-acts"><button class="btn primary" type="button" data-wfix="${d.id}">Зафиксировать</button><button class="btn" type="button" data-wstop="${d.id}">${d.stoppedOn ? 'Возобновить' : 'Остановить'}</button><button class="btn ghost" type="button" data-wedit="${d.id}" aria-label="Изменить">✎</button></div></div>
+          <div class="wd-acts"><button class="btn btn-primary" type="button" data-wfix="${d.id}">Зафиксировать</button><button class="btn" type="button" data-wstop="${d.id}">${d.stoppedOn ? 'Возобновить' : 'Остановить'}</button><button class="btn ghost" type="button" data-wedit="${d.id}" aria-label="Изменить">✎</button></div></div>
         <div class="wd-sum">${d.fixes.length ? `заявок всего ${d.total.toLocaleString('ru-RU')} · начислено ${rub(d.accrued)} · оплачено ${rub(d.paidSum)}${d.owed ? ` · <span class="owed">должен ${rub(d.owed)}</span>` : ''}` : 'фиксаций ещё не было'}${d.note ? ` · ${esc(d.note)}` : ''}</div>
         ${open.map((f) => fixLine(d, f, f.id === lastId)).join('')}
         ${done.length ? `<details><summary>Оплаченные фиксации · ${done.length}</summary>${done.map((f) => fixLine(d, f, f.id === lastId)).join('')}</details>` : ''}
@@ -588,7 +724,7 @@ function renderRecurring() {
       if (!r.active) acts = '<span class="chip">выключен</span>';
       else if (r.state === 'paid') acts = '<span class="chip">✓ записан</span>';
       else if (r.state === 'skipped') acts = `<span class="chip">пропущен</span><button class="btn ghost" type="button" data-rskip="${id}" data-on="0">Вернуть</button>`;
-      else if (r.state === 'due') acts = `<button class="btn primary" type="button" data-rpay="${id}">Записать</button><button class="btn" type="button" data-rskip="${id}" data-on="1">Пропустить</button>`;
+      else if (r.state === 'due') acts = `<button class="btn btn-primary" type="button" data-rpay="${id}">Записать</button><button class="btn" type="button" data-rskip="${id}" data-on="1">Пропустить</button>`;
       else acts = `<span class="chip">будет ${day(Date.parse(`${r.dueDate}T09:00:00Z`))}</span><button class="btn ghost" type="button" data-rpay="${id}" title="Записать заранее">Записать</button>`;
       const sub = [nameOrDash(S.categories, r.categoryId), nameOrDash(S.projects, r.projectId), nameOrDash(S.wallets, r.walletId)].filter(Boolean).map(esc).join(' · ');
       return `<div class="deal${!r.active || r.state === 'paid' || r.state === 'skipped' ? ' done' : ''}"><span class="when">${String(r.day).padStart(2, '0')} числа</span>
@@ -655,8 +791,10 @@ const stamp = (ms) => `${day(ms)} ${new Date(ms + MSK).toISOString().slice(11, 1
 function renderVpn() {
   vpnPicked.clear();
   syncVpnPick();
-  $('#vpnCard').hidden = !vpnRows.length;
-  if (!vpnRows.length) return;
+  if (!vpnRows.length) {
+    $('#vpn').innerHTML = '<div class="empty">Всё разобрано: у каждой оплаты VPN есть платёжка.</div>';
+    return;
+  }
   const total = vpnRows.reduce((s, p) => s + p.amount, 0);
   $('#vpn').innerHTML =
     `<h3 class="ads-h"><label class="pick"><input type="checkbox" data-vpick-all aria-label="Выбрать все">Без платёжки · ${vpnRows.length} · ${rub(total)}</label></h3>` +
@@ -846,9 +984,11 @@ async function load() {
   ]);
   $('#login').hidden = true;
   $('#app').hidden = false;
-  if (location.search) history.replaceState(null, '', '/');
+  if (location.search) history.replaceState(null, '', location.pathname + location.hash);
   const [y, m] = month.split('-').map(Number);
-  $('#monthLabel').textContent = byYear ? String(year) : new Date(Date.UTC(y, m - 1, 15)).toLocaleString('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  // на узком телефоне месяц — коротко («окт 2026»), иначе подпись не помещается рядом с «+»
+  const monthLong = new Date(Date.UTC(y, m - 1, 15)).toLocaleString('ru-RU', { month: 'long', timeZone: 'UTC' });
+  $('#monthLabel').innerHTML = byYear ? String(year) : `<span class="m-l">${monthLong}</span><span class="m-s">${MONTHS[m - 1]}</span> ${y}`;
   $('#prevMonth').setAttribute('aria-label', byYear ? 'Прошлый год' : 'Прошлый месяц');
   $('#nextMonth').setAttribute('aria-label', byYear ? 'Следующий год' : 'Следующий месяц');
   for (const b of $('#period').children) {
@@ -857,6 +997,10 @@ async function load() {
   }
   $('#reportTitle').textContent = byYear ? 'Итоги года' : 'Итоги месяца';
   renderTiles(byYear ? report.total : report);
+  renderTodo();
+  renderBadges();
+  const usdt = S.wallets.find((w) => w.currency === 'USDT' && w.rate);
+  $('#sysRate').textContent = usdt ? `1 USDT = ${usdt.rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽` : 'курсы — CoinGecko';
   renderAds();
   renderIncome();
   renderWelcome();
@@ -867,6 +1011,8 @@ async function load() {
   $('#ops').innerHTML = byYear
     ? '<div class="empty">Операции — в режиме <button class="link" type="button" data-period="month">«Месяц»</button>.</div>'
     : ops.length ? ops.map(opLine).join('') : '<div class="empty">За этот месяц операций нет.</div>';
+  $('#recentSub').textContent = byYear ? 'в режиме «Год» — по месяцам в «Итогах»' : `за ${new Date(Date.UTC(y, m - 1, 15)).toLocaleString('ru-RU', { month: 'long', timeZone: 'UTC' })}`;
+  $('#recent').innerHTML = byYear ? '' : ops.length ? ops.slice(0, 8).map(opLine).join('') : '<div class="empty">За этот месяц операций нет.</div>';
 }
 
 // Месяц ↔ год. Из года в месяц — тот же месяц выбранного года, или тот, что нажали в таблице.
@@ -1052,7 +1198,6 @@ $('#incDays').addEventListener('click', (e) => {
   renderIncome();
 });
 
-$('#openCatalog').addEventListener('click', () => openCatalog().catch((e) => toast(e.message)));
 $('#catalog').addEventListener('change', (e) => {
   const t = e.target;
   if (t.dataset.rename) {
@@ -1266,8 +1411,18 @@ $('#ops').addEventListener('click', async (e) => {
 
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-close]')) e.target.closest('dialog')?.close();
+  if (e.target.closest('[data-add-op]')) openOp();
+  if (e.target.closest('[data-more]')) $('#moreDlg').showModal();
+  if (e.target.closest('[data-catalog]')) {
+    if ($('#moreDlg').open) $('#moreDlg').close();
+    openCatalog().catch((err) => toast(err.message));
+  }
+  if (e.target.closest('[data-logout]')) fetch('/auth/logout', { method: 'POST' }).finally(() => (location.href = '/'));
 });
-$('#addOp').addEventListener('click', openOp);
+// лист «Ещё» закрывается и нажатием мимо него
+$('#moreDlg').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.close();
+});
 $('#addWallet').addEventListener('click', () => {
   $('#walletForm').reset();
   $('#walletError').hidden = true;
@@ -1288,10 +1443,6 @@ $('#period').addEventListener('click', (e) => {
 $('#report').addEventListener('click', (e) => {
   const tr = e.target.closest('tr[data-month]');
   if (tr) setPeriod('month', tr.dataset.month);
-});
-$('#logout').addEventListener('click', async () => {
-  await fetch('/auth/logout', { method: 'POST' });
-  location.href = '/';
 });
 
 load()

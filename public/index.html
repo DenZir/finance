@@ -5,110 +5,194 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Деньги</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2357b6ff'/><text x='16' y='23' font-size='18' text-anchor='middle' fill='%230b0f14' font-family='sans-serif' font-weight='700'>₽</text></svg>">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230E141D'/%3E%3Cpath d='M11 26V7h7a5 5 0 0 1 0 10H8M8 21h11' fill='none' stroke='%2357B6FF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
+<div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-noise"></div>
+
 <div id="login" class="login" hidden>
-  <div class="login-card">
-    <div class="brand"><span class="logo">₽</span><b>Деньги</b></div>
+  <div class="login-card card hero">
+    <div class="brand"><div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="url(#lgr-login)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><defs><linearGradient id="lgr-login" x1="5" y1="3" x2="19" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#7CC6FF"/><stop offset="1" stop-color="#3D9BE9"/></linearGradient></defs><path d="M8 20V4h5a4 4 0 0 1 0 8H6M6 16h8"/></svg></div><div class="brand-t">Деньги<span class="brand-sub">учёт · владелец</span></div></div>
     <p class="muted">Учёт доходов, комиссий и кошельков. Вход — через Telegram, только для владельца.</p>
     <div id="widget"></div>
     <p id="loginError" class="err" hidden></p>
   </div>
 </div>
 
-<div id="app" hidden>
-  <header class="top">
-    <div class="brand"><span class="logo">₽</span><b>Деньги</b></div>
-    <div class="month">
-      <button class="icon" id="prevMonth" type="button" aria-label="Прошлый месяц">‹</button>
-      <span id="monthLabel"></span>
-      <button class="icon" id="nextMonth" type="button" aria-label="Следующий месяц">›</button>
+<div id="app" class="app" hidden>
+  <!-- ================= МЕНЮ — как в tg-analytics ================= -->
+  <aside class="sidebar">
+    <div class="brand"><div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="url(#lgr)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><defs><linearGradient id="lgr" x1="5" y1="3" x2="19" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#7CC6FF"/><stop offset="1" stop-color="#3D9BE9"/></linearGradient></defs><path d="M8 20V4h5a4 4 0 0 1 0 8H6M6 16h8"/></svg></div><div class="brand-t">Деньги<span class="brand-sub">учёт · владелец</span></div></div>
+    <div class="nav-cap">Разделы</div>
+    <nav id="nav" aria-label="Разделы">
+      <button class="nav-it on" type="button" data-scr="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg><span class="lbl">Обзор</span></button>
+      <button class="nav-it" type="button" data-scr="ads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 17 5v13L3 12.5v-2z"/><path d="M7 13.5V18a2 2 0 0 0 4 0v-3"/><path d="M17 8.5c1.7.6 2.5 1.7 2.5 3s-.8 2.4-2.5 3"/></svg><span class="lbl">Реклама</span><span class="nbadge" data-nb="ads" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="welcome"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="lbl">Приветка</span><span class="nbadge" data-nb="welcome" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11a7 7 0 0 1 12-5l2 2"/><path d="M18 4v4h-4"/><path d="M20 13a7 7 0 0 1-12 5l-2-2"/><path d="M6 20v-4h4"/></svg><span class="lbl">Регулярные</span><span class="nbadge" data-nb="recurring" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="vpn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2 2 4-4"/></svg><span class="lbl">VPN — разобрать</span><span class="nbadge" data-nb="vpn" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="wallets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M15.5 13.5h2"/></svg><span class="lbl">Кошельки</span></button>
+      <button class="nav-it" type="button" data-scr="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11M9.3 19V6M14.6 19v-9M20 19V4"/></svg><span class="lbl">Итоги</span></button>
+      <button class="nav-it" type="button" data-scr="ops"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span class="lbl">Операции</span></button>
+    </nav>
+    <div class="side-spacer"></div>
+    <div class="syscard">
+      <div class="sysrow"><span class="pulse"></span> Импорт оплат</div>
+      <div class="sysrow dim">ботприват · аналитика · VPN</div>
+      <div class="sysrow dim" id="sysRate"></div>
     </div>
-    <div class="top-r"><button class="icon" id="openCatalog" type="button" aria-label="Виды и проекты" title="Виды и проекты">⚙</button><button class="btn ghost" id="logout" type="button">Выйти</button></div>
-  </header>
+    <div class="admin-chip">
+      <span class="ava">₽</span>
+      <div>Владелец<span>вход через Telegram</span></div>
+      <button class="btn ic out" type="button" data-logout title="Выйти" aria-label="Выйти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M14 8l4 4-4 4m4-4H9"/></svg></button>
+    </div>
+  </aside>
 
-  <main class="wrap">
-    <section class="tiles" id="tiles"></section>
+  <main>
+    <header class="topbar">
+      <div class="tb-title">
+        <div class="eyebrow" id="tbEyebrow"></div>
+        <h1 id="tbTitle">Обзор</h1>
+        <div class="tb-sub" id="tbSub"></div>
+      </div>
+      <div class="tb-actions">
+        <div class="month">
+          <button class="btn ic" id="prevMonth" type="button" aria-label="Прошлый месяц"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+          <span id="monthLabel"></span>
+          <button class="btn ic" id="nextMonth" type="button" aria-label="Следующий месяц"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+        </div>
+        <div class="seg" id="period" role="group" aria-label="Период"><button type="button" data-period="month" class="on" aria-pressed="true">Месяц</button><button type="button" data-period="year" aria-pressed="false">Год</button></div>
+        <button class="btn btn-primary tb-add" type="button" data-add-op aria-label="Новая операция"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Операция</span></button>
+        <button class="btn ic tb-cat" type="button" data-catalog title="Виды и проекты" aria-label="Виды и проекты"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      </div>
+    </header>
 
-    <!-- Колонки для широкого экрана; узко обёртки прозрачны (display: contents), и
-         карточки идут одним столбцом в прежнем порядке (order в style.css) -->
-    <div class="col col-a">
-      <section class="card" id="incomeCard">
-        <div class="card-h inc-h"><h2 id="incomeTitle">Доход</h2>
+    <div class="content">
+      <!-- ========== ОБЗОР ========== -->
+      <section class="screen active" id="scr-overview">
+        <div class="kpis" id="tiles"></div>
+        <!-- Колонки, а не одна сетка: короткая карточка не оставляет дыру до следующего ряда -->
+        <div class="ov-grid">
+          <div class="ov-col ov-a">
+        <article class="card hero" id="incomeCard">
+          <div class="card-h"><span class="card-idx">01 / доход</span><div class="card-tt"><h2 class="card-t" id="incomeTitle">Доход</h2></div></div>
           <div class="inc-ctl">
             <div class="seg mini" id="incMode" role="group" aria-label="Что показать"><button type="button" data-mode="income" class="on">Доход</button><button type="button" data-mode="expense">Расход</button><button type="button" data-mode="net">Чистыми</button></div>
             <div class="seg mini" id="incBy" role="group" aria-label="Источники"><button type="button" data-by="cat" class="on">По виду</button><button type="button" data-by="proj">По проекту</button></div>
             <div class="seg mini" id="incNet" role="group" aria-label="Суммы"><button type="button" data-net="0" class="on">До комиссий</button><button type="button" data-net="1">Чистыми</button></div>
             <div class="seg mini" id="incVpn" role="group" aria-label="Проект с партнёром" hidden><button type="button" data-vpn="all" class="on">VPN целиком</button><button type="button" data-vpn="own">Ваша доля</button></div>
           </div>
-        </div>
-        <div class="inc-total"><b id="incTotal"></b><span id="incSub"></span></div>
-        <div class="inc-share" id="incShare" aria-hidden="true"></div>
-        <div class="inc-chips" id="incChips"></div>
-        <div class="inc-chart"><canvas id="incChart" aria-label="Доход по дням"></canvas><div class="inc-fallback" id="incFallback" hidden>График не загрузился (Chart.js с cdnjs) — суммы по дням ниже</div></div>
-        <div id="incDays"></div>
-      </section>
-      <section class="card" id="reportCard">
-        <div class="card-h"><h2 id="reportTitle">Итоги месяца</h2>
-          <div class="seg mini" id="period" role="group" aria-label="Период">
-            <button type="button" data-period="month" class="on" aria-pressed="true">Месяц</button><button type="button" data-period="year" aria-pressed="false">Год</button>
+          <div class="inc-total"><b id="incTotal"></b><span id="incSub"></span></div>
+          <div class="inc-share" id="incShare" aria-hidden="true"></div>
+          <div class="inc-chips" id="incChips"></div>
+          <div class="inc-chart"><canvas id="incChart" aria-label="Доход по дням"></canvas><div class="inc-fallback" id="incFallback" hidden>График не загрузился (Chart.js с cdnjs) — суммы по дням ниже</div></div>
+          <div id="incDays"></div>
+        </article>
           </div>
-        </div>
-        <div id="report"></div>
-      </section>
-    </div>
-    <div class="col col-b">
-      <section class="card" id="adsCard" hidden>
-        <div class="card-h"><h2>Реклама</h2><button class="btn ghost" id="adsAll" type="button">Все сделки</button></div>
-        <div id="ads"></div>
-        <div class="ads-bar" id="adsBar" hidden>
-          <span id="adsPicked"></span>
-          <div class="ads-bar-b">
-            <button class="btn" type="button" data-bulk="waiting" title="Продажи — «Ждём оплату», закупы — «Надо оплатить»">Ждём оплату</button>
-            <button class="btn" type="button" data-bulk="barter">Бартер</button>
-            <button class="btn" type="button" data-bulk="unsort">Не разобрана</button>
-            <button class="btn ghost" type="button" data-bulk-clear>Снять выбор</button>
+          <div class="ov-col ov-b">
+        <article class="card" id="todoCard">
+          <div class="card-h"><span class="card-idx">02 / ждёт действия</span><div class="card-tt"><h2 class="card-t">Что ждёт действия</h2><div class="card-s">Оплаты, разбор и регулярные расходы</div></div></div>
+          <div id="todo" class="todo"></div>
+        </article>
+          </div>
+          <div class="ov-col ov-c">
+        <article class="card" id="recentCard">
+          <div class="card-h"><span class="card-idx">03 / поток</span><div class="card-tt"><h2 class="card-t">Последние операции</h2><div class="card-s" id="recentSub">за выбранный месяц</div></div><div class="right"><button class="btn tiny" type="button" data-scr="ops">Все операции</button></div></div>
+          <div id="recent" class="recent"></div>
+        </article>
           </div>
         </div>
       </section>
-      <section class="card" id="welcomeCard">
-        <div class="card-h"><h2>Приветка</h2><button class="btn" id="addWelcome" type="button">+ Размещение</button></div>
-        <div id="welcome"></div>
-      </section>
-      <section class="card" id="recurringCard">
-        <div class="card-h"><h2 id="recurringTitle">Регулярные расходы</h2><button class="btn" id="addRecurring" type="button">+ Расход</button></div>
-        <div class="wd-sum rec-sum" id="recurringSum"></div>
-        <div id="recurring"></div>
-      </section>
-      <section class="card" id="vpnCard" hidden>
-        <div class="card-h"><h2>VPN — разобрать</h2></div>
-        <p class="hint vpn-hint">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией.</p>
-        <div id="vpn"></div>
-        <div class="ads-bar" id="vpnBar" hidden>
-          <span id="vpnPicked"></span>
-          <div class="ads-bar-b">
-            <span id="vpnBulkProviders" class="ads-bar-b"></span>
-            <button class="btn" type="button" data-vbulk="skip" title="Тестовая оплата и т. п. — в доход не идёт">Не учитывать</button>
-            <button class="btn ghost" type="button" data-vbulk-clear>Снять выбор</button>
+
+      <section class="screen" id="scr-ads">
+        <article class="card" id="adsCard">
+          <div class="card-h"><span class="card-idx">01 / сделки</span><div class="card-tt"><h2 class="card-t">Сделки рекламы</h2><div class="card-s">Из аналитики: оплачено, ждём оплату, бартер. Галочки — отметить пачкой</div></div><div class="right"><button class="btn" id="adsAll" type="button">Все сделки</button></div></div>
+          <div id="ads"></div>
+          <div class="ads-bar" id="adsBar" hidden>
+            <span id="adsPicked"></span>
+            <div class="ads-bar-b">
+              <button class="btn" type="button" data-bulk="waiting" title="Продажи — «Ждём оплату», закупы — «Надо оплатить»">Ждём оплату</button>
+              <button class="btn" type="button" data-bulk="barter">Бартер</button>
+              <button class="btn" type="button" data-bulk="unsort">Не разобрана</button>
+              <button class="btn ghost" type="button" data-bulk-clear>Снять выбор</button>
+            </div>
           </div>
-        </div>
+        </article>
       </section>
-    </div>
-    <div class="col col-c">
-      <section class="card" id="walletsCard">
-        <div class="card-h"><h2>Кошельки</h2><button class="btn" id="addWallet" type="button">+ Кошелёк</button></div>
-        <div id="wallets" class="wallets"></div>
+      <section class="screen" id="scr-welcome">
+        <article class="card" id="welcomeCard">
+          <div class="card-h"><span class="card-idx">01 / приветка</span><div class="card-tt"><h2 class="card-t">Размещения в приветке</h2><div class="card-s">Покупатель присылает число заявок — фиксация считает долг за новые</div></div><div class="right"><button class="btn btn-primary" id="addWelcome" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Размещение</button></div></div>
+          <div id="welcome"></div>
+        </article>
       </section>
-      <section class="card" id="opsCard">
-        <div class="card-h"><h2>Операции</h2><button class="btn primary" id="addOp" type="button">+ Операция</button></div>
-        <div id="ops"></div>
+      <section class="screen" id="scr-recurring">
+        <article class="card" id="recurringCard">
+          <div class="card-h"><span class="card-idx">01 / регулярные</span><div class="card-tt"><h2 class="card-t" id="recurringTitle">Регулярные расходы</h2><div class="card-s" id="recurringSum"></div></div><div class="right"><button class="btn btn-primary" id="addRecurring" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Расход</button></div></div>
+          <div id="recurring"></div>
+        </article>
+      </section>
+      <section class="screen" id="scr-vpn">
+        <article class="card" id="vpnCard">
+          <div class="card-h"><span class="card-idx">01 / разбор</span><div class="card-tt"><h2 class="card-t">Оплаты без платёжки</h2><div class="card-s">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией</div></div></div>
+          <div id="vpn"></div>
+          <div class="ads-bar" id="vpnBar" hidden>
+            <span id="vpnPicked"></span>
+            <div class="ads-bar-b">
+              <span id="vpnBulkProviders" class="ads-bar-b"></span>
+              <button class="btn" type="button" data-vbulk="skip" title="Тестовая оплата и т. п. — в доход не идёт">Не учитывать</button>
+              <button class="btn ghost" type="button" data-vbulk-clear>Снять выбор</button>
+            </div>
+          </div>
+        </article>
+      </section>
+      <section class="screen" id="scr-wallets">
+        <article class="card" id="walletsCard">
+          <div class="card-h"><span class="card-idx">01 / кошельки</span><div class="card-tt"><h2 class="card-t">Кошельки и кабинеты</h2><div class="card-s">Остаток — сумма операций; в рублях — по текущему курсу</div></div><div class="right"><button class="btn btn-primary" id="addWallet" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Кошелёк</button></div></div>
+          <div id="wallets" class="wallets"></div>
+        </article>
+      </section>
+      <section class="screen" id="scr-report">
+        <article class="card" id="reportCard">
+          <div class="card-h"><span class="card-idx">01 / итоги</span><div class="card-tt"><h2 class="card-t" id="reportTitle">Итоги месяца</h2><div class="card-s">Доходы по видам и проектам, комиссии, потери при выводе и расходы</div></div></div>
+          <div id="report"></div>
+        </article>
+      </section>
+      <section class="screen" id="scr-ops">
+        <article class="card" id="opsCard">
+          <div class="card-h"><span class="card-idx">01 / операции</span><div class="card-tt"><h2 class="card-t">Операции</h2><div class="card-s">Всё, что записано за месяц: руками, ботом и импортом</div></div><div class="right"><button class="btn btn-primary" type="button" data-add-op><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Операция</button></div></div>
+          <div id="ops"></div>
+        </article>
       </section>
     </div>
   </main>
+
+  <!-- Телефон: меню снизу, редкие разделы — в «Ещё» -->
+  <nav class="tabbar" aria-label="Разделы">
+    <button class="tab on" type="button" data-scr="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg><span>Обзор</span></button>
+    <button class="tab" type="button" data-scr="ads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 17 5v13L3 12.5v-2z"/><path d="M7 13.5V18a2 2 0 0 0 4 0v-3"/><path d="M17 8.5c1.7.6 2.5 1.7 2.5 3s-.8 2.4-2.5 3"/></svg><span>Реклама</span><i class="tbadge" data-nb="ads" hidden></i></button>
+    <button class="tab" type="button" data-scr="recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11a7 7 0 0 1 12-5l2 2"/><path d="M18 4v4h-4"/><path d="M20 13a7 7 0 0 1-12 5l-2-2"/><path d="M6 20v-4h4"/></svg><span>Регулярные</span><i class="tbadge" data-nb="recurring" hidden></i></button>
+    <button class="tab" type="button" data-scr="ops"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span>Операции</span></button>
+    <button class="tab" type="button" data-more><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg><span>Ещё</span><i class="tbadge" data-nb="more" hidden></i></button>
+  </nav>
 </div>
+
+<dialog id="moreDlg" class="dlg sheet">
+  <div class="sheet-b">
+    <div class="dlg-h"><h3>Ещё</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <nav class="more-nav" aria-label="Другие разделы">
+      <button class="nav-it" type="button" data-scr="welcome"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="lbl">Приветка</span><span class="nbadge" data-nb="welcome" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="vpn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2 2 4-4"/></svg><span class="lbl">VPN — разобрать</span><span class="nbadge" data-nb="vpn" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="wallets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M15.5 13.5h2"/></svg><span class="lbl">Кошельки</span></button>
+      <button class="nav-it" type="button" data-scr="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11M9.3 19V6M14.6 19v-9M20 19V4"/></svg><span class="lbl">Итоги</span></button>
+      <button class="nav-it" type="button" data-catalog><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="lbl">Виды и проекты</span></button>
+      <button class="nav-it" type="button" data-logout><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M14 8l4 4-4 4m4-4H9"/></svg><span class="lbl">Выйти</span></button>
+    </nav>
+  </div>
+</dialog>
 
 <dialog id="opDlg" class="dlg">
   <form id="opForm" method="dialog" novalidate>
@@ -123,7 +207,7 @@
     <div id="opFields" class="fields"></div>
     <p id="opHint" class="hint"></p>
     <p id="opError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
   </form>
 </dialog>
 
@@ -139,7 +223,7 @@
     </div>
     <p id="payHint" class="hint"></p>
     <p id="payError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Записать</button></div>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Записать</button></div>
   </form>
 </dialog>
 
@@ -154,7 +238,7 @@
     </div>
     <p class="hint">Цена меняется для следующих фиксаций — прошлые посчитаны по старой.</p>
     <p id="welcomeError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn danger" type="button" id="welcomeDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+    <div class="dlg-f"><button class="btn btn-danger" type="button" id="welcomeDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
   </form>
 </dialog>
 
@@ -168,7 +252,7 @@
     </div>
     <p id="fixCalc" class="hint"></p>
     <p id="fixError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Зафиксировать</button></div>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Зафиксировать</button></div>
   </form>
 </dialog>
 
@@ -182,7 +266,7 @@
     </div>
     <p id="partnerCounted" class="hint"></p>
     <p id="partnerError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сверить</button></div>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сверить</button></div>
   </form>
 </dialog>
 
@@ -210,7 +294,7 @@
     </div>
     <p class="hint">В этот день, с 10:00 по Москве, бот пришлёт готовый черновик: «Записать», «Пропустить в этом месяце» или ответьте ему другой суммой. 31-е в коротком месяце — его последний день.</p>
     <p id="recurringError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn danger" type="button" id="recurringDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+    <div class="dlg-f"><button class="btn btn-danger" type="button" id="recurringDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
   </form>
 </dialog>
 
@@ -229,7 +313,7 @@
       <label>Комиссия с приёма, %<input name="feePct" inputmode="decimal" placeholder="0"></label>
     </div>
     <p id="walletError" class="err" hidden></p>
-    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Добавить</button></div>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Добавить</button></div>
   </form>
 </dialog>
 

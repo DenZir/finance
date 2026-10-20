@@ -50,7 +50,8 @@ export interface Draft {
   amount: number;
   /** валюта, названная в строке; null — валюта кошелька */
   currency: string | null;
-  walletId: number;
+  /** null — регулярный расход, который оплачивает партнёр: кошелька нет */
+  walletId: number | null;
   categoryId: number | null;
   projectId: number | null;
   /** начало дня по Москве, когда прислана строка */
@@ -116,16 +117,19 @@ const nameById = (db: Db, table: 'categories' | 'projects' | 'wallets', id: numb
 /** Как записанная операция выглядит в сообщении — по базе, а не по черновику. */
 function opCard(db: Db, opId: number): Card | null {
   const op = db.prepare('SELECT * FROM operations WHERE id = ?').get(opId) as
-    | { kind: string; at: number; category_id: number | null; project_id: number | null; note: string; gross_rub: number }
+    | { kind: string; at: number; category_id: number | null; project_id: number | null; note: string; gross_rub: number; paid_by: string | null; paid_amount: number | null; paid_currency: string | null }
     | undefined;
   if (!op) return null;
   const entry = db.prepare('SELECT wallet_id, amount FROM entries WHERE op_id = ? ORDER BY id LIMIT 1').get(opId) as { wallet_id: number; amount: number } | undefined;
   const wallet = entry ? listWallets(db).find((w) => w.id === entry.wallet_id) : undefined;
-  const sum = !wallet || !entry || wallet.currency === 'RUB' ? rub(op.gross_rub) : `${amount(Math.abs(entry.amount), wallet.currency)} ≈ ${rub(op.gross_rub)}`;
+  // оплатил партнёр — кошелька нет, сумма в той валюте, в которой он платил
+  const sum = op.paid_by === 'partner' && op.paid_amount != null && op.paid_currency && op.paid_currency !== 'RUB'
+    ? `${amount(op.paid_amount, op.paid_currency)} ≈ ${rub(op.gross_rub)}`
+    : !wallet || !entry || wallet.currency === 'RUB' ? rub(op.gross_rub) : `${amount(Math.abs(entry.amount), wallet.currency)} ≈ ${rub(op.gross_rub)}`;
   return {
     title: op.kind === 'income' ? 'Доход' : 'Расход',
     sum,
-    wallet: wallet?.name ?? '—',
+    wallet: op.paid_by === 'partner' ? 'платит партнёр' : wallet?.name ?? '—',
     category: nameById(db, 'categories', op.category_id),
     project: nameById(db, 'projects', op.project_id),
     date: ddmm(mskIso(op.at)),
@@ -249,11 +253,13 @@ export class QuickEntry {
         return this.render(d, 'main');
       }
       case 'p':
+        if (d.walletId === null) return { answer: 'Платит партнёр — проект задан в регулярном расходе' };
         if (arg === null) return this.render(d, 'proj');
         if (arg !== 0 && !listProjects(db).some((p) => p.id === arg)) return { answer: 'Такого проекта нет' };
         d.projectId = arg === 0 ? null : arg;
         return this.render(d, 'main');
       case 'w':
+        if (d.walletId === null) return { answer: 'Платит партнёр — кошелёк не нужен' };
         if (arg === null) return this.render(d, 'wallet');
         if (!listWallets(db).some((w) => w.id === arg && !w.archived)) return { answer: 'Такого кошелька нет' };
         d.walletId = arg;
@@ -315,18 +321,29 @@ export class QuickEntry {
     return { calc: { walletAmount, rate: rubs / walletAmount, rub: rubs, converted: true } };
   }
 
+  /** Платит партнёр: сумма — в той валюте, в которой он платил, в рублях — по курсу. */
+  private async computePartner(d: Draft): Promise<{ calc: Calc } | { problem: string }> {
+    const { db, fetchRate, now } = this.deps;
+    const stated = d.currency ?? 'RUB';
+    const rate = await currentRate(db, stated, fetchRate, now());
+    if (rate === null) return { problem: `нет курса ${stated} — запишите на странице, вписав курс` };
+    return { calc: { walletAmount: d.amount, rate, rub: toRub(d.amount, rate), converted: false } };
+  }
+
   private async render(d: Draft, view: View): Promise<Outcome> {
     const { db } = this.deps;
     const wallets = listWallets(db);
+    const partner = d.walletId === null;
     const wallet = wallets.find((w) => w.id === d.walletId);
-    if (!wallet) return { answer: 'Кошелька больше нет — пришлите заново' };
-    const r = await this.compute(d, wallet);
+    if (!partner && !wallet) return { answer: 'Кошелька больше нет — пришлите заново' };
+    const r = wallet ? await this.compute(d, wallet) : await this.computePartner(d);
     d.calc = 'calc' in r ? r.calc : null;
     d.problem = 'problem' in r ? r.problem : null;
 
-    const stated = d.currency ?? wallet.currency;
+    const stated = d.currency ?? wallet?.currency ?? 'RUB';
     let sum: string;
     if (!d.calc) sum = amount(d.amount, stated);
+    else if (!wallet) sum = stated === 'RUB' ? amount(d.amount, stated) : `${amount(d.amount, stated)} ≈ ${rub(d.calc.rub)}`;
     else {
       const parts = [amount(d.calc.walletAmount, wallet.currency)];
       if (d.calc.converted) parts.unshift(amount(d.amount, stated));
@@ -337,7 +354,7 @@ export class QuickEntry {
     let text = cardText({
       title: KIND_TITLE[d.kind],
       sum,
-      wallet: wallet.name,
+      wallet: wallet ? wallet.name : 'платит партнёр',
       category: nameById(db, 'categories', d.categoryId),
       project: nameById(db, 'projects', d.projectId),
       date: `${ddmm(mskIso(at))}, ${d.yesterday ? 'вчера' : 'сегодня'}`,
@@ -365,7 +382,11 @@ export class QuickEntry {
     } else if (view === 'wallet') {
       keyboard = choose(wallets.filter((w) => !w.archived).map((w) => ({ id: w.id, label: `${w.name} · ${w.currency}`, on: w.id === d.walletId })), 'w');
     } else {
-      keyboard = d.recurring ? [
+      // платит партнёр — ни кошелька, ни проекта: проект с партнёром задан в регулярном
+      keyboard = d.recurring && partner ? [
+        [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: '⏭ Пропустить в этом месяце', callback_data: cb(d.id, 's') }],
+        [{ text: 'Вид', callback_data: cb(d.id, 'c') }, { text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }],
+      ] : d.recurring ? [
         [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: '⏭ Пропустить в этом месяце', callback_data: cb(d.id, 's') }],
         [{ text: 'Вид', callback_data: cb(d.id, 'c') }, { text: 'Проект', callback_data: cb(d.id, 'p') }, { text: 'Кошелёк', callback_data: cb(d.id, 'w') }],
         [{ text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }],
@@ -382,9 +403,10 @@ export class QuickEntry {
   private save(d: Draft): Outcome {
     const { db, now } = this.deps;
     if (!d.calc) return { answer: d.problem ?? 'Нечего записывать', alert: true };
+    if (!d.recurring && d.walletId === null) return { answer: 'Нет кошелька — пришлите заново', alert: true };
     const base = {
       at: atOf(d),
-      walletId: d.walletId,
+      walletId: d.walletId ?? 0,
       amount: d.calc.walletAmount,
       rate: d.calc.rate,
       categoryId: d.categoryId,
@@ -396,7 +418,7 @@ export class QuickEntry {
     try {
       // Доход из бота — перевод на кошелёк, а не приём платёжки: комиссии нет.
       id = d.recurring
-        ? payRecurring(db, d.recurring.id, d.recurring.month, { walletId: d.walletId, amount: d.calc.walletAmount, rate: d.calc.rate, at: atOf(d) }, now())
+        ? payRecurring(db, d.recurring.id, d.recurring.month, { walletId: d.walletId, amount: d.calc.walletAmount, rate: d.calc.rate, at: atOf(d), currency: d.currency ?? undefined }, now())
         : d.kind === 'income' ? addIncome(db, { ...base, feePct: 0 }, now()) : addExpense(db, base, now());
       // вид и проект, поправленные в черновике, — у этой записи
       if (d.recurring) db.prepare('UPDATE operations SET category_id = ?, project_id = ? WHERE id = ?').run(d.categoryId, d.projectId, id);

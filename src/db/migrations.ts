@@ -279,4 +279,46 @@ export const MIGRATIONS: readonly string[] = [
   WHERE role = 'vpn:card_ru';
   UPDATE vpn_payments SET provider = 'parity' WHERE provider = 'card_ru';
   `,
+  `
+  -- Расходы VPN оплачивает то владелец, то партнёр, а разницу потом докидывают
+  -- (владелец, 2026-10-20). Расход, оплаченный партнёром, — операция без
+  -- проводок: кошельки владельца не трогает, но входит в расходы проекта и в
+  -- расчёт с партнёром. paid_amount / paid_currency — сколько и в чём он платил.
+  ALTER TABLE operations ADD COLUMN paid_by TEXT;          -- 'partner'; null — владелец
+  ALTER TABLE operations ADD COLUMN paid_amount INTEGER;   -- микро в paid_currency
+  ALTER TABLE operations ADD COLUMN paid_currency TEXT;
+  `,
+  `
+  -- Регулярный расход тоже может оплачивать партнёр — тогда кошелька у него нет.
+  -- SQLite не снимает NOT NULL, поэтому таблица пересобирается. Ссылки из
+  -- recurring_skips и recurring_notices идут по имени и после пересборки
+  -- указывают на новую таблицу; проверка ссылок — в конце транзакции, когда
+  -- строки уже на месте. Счётчик номеров сохраняется: номер удалённого
+  -- регулярного не достаётся новому, иначе его записанные месяцы приписались бы
+  -- чужому расходу (source_ref '<id>:<ГГГГ-ММ>').
+  PRAGMA defer_foreign_keys = ON;
+  CREATE TABLE recurring_tmp AS SELECT * FROM recurring;
+  CREATE TABLE recurring_seq AS SELECT seq FROM sqlite_sequence WHERE name = 'recurring';
+  DROP TABLE recurring;
+  CREATE TABLE recurring (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    amount      INTEGER NOT NULL,              -- микро в валюте currency
+    currency    TEXT    NOT NULL,
+    wallet_id   INTEGER REFERENCES wallets(id), -- null — платит партнёр
+    category_id INTEGER REFERENCES categories(id),
+    project_id  INTEGER REFERENCES projects(id),
+    day         INTEGER NOT NULL,              -- какого числа, 1–31
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
+    paid_by     TEXT                           -- 'partner'; null — владелец
+  );
+  INSERT INTO recurring (id, name, amount, currency, wallet_id, category_id, project_id, day, active, created_at)
+    SELECT id, name, amount, currency, wallet_id, category_id, project_id, day, active, created_at FROM recurring_tmp;
+  DELETE FROM sqlite_sequence WHERE name = 'recurring';
+  INSERT INTO sqlite_sequence (name, seq)
+    SELECT 'recurring', MAX(COALESCE((SELECT seq FROM recurring_seq), 0), COALESCE((SELECT MAX(id) FROM recurring), 0));
+  DROP TABLE recurring_tmp;
+  DROP TABLE recurring_seq;
+  `,
 ];

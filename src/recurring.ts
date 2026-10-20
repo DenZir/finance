@@ -9,7 +9,7 @@
  */
 import type { Db } from './db/index.js';
 import { MoneyInputError, parseAmount } from './money.js';
-import { addExpense, getWallet } from './ledger.js';
+import { addExpense, addPartnerExpense, getWallet, listProjects } from './ledger.js';
 
 export const SOURCE = 'recurring';
 const MONTH = /^\d{4}-\d{2}$/;
@@ -21,7 +21,10 @@ export interface Recurring {
   /** микро в валюте `currency` */
   amount: number;
   currency: string;
-  walletId: number;
+  /** с какого кошелька; null — платит партнёр */
+  walletId: number | null;
+  /** 'partner' — расход оплачивает партнёр из своих денег (владелец, 2026-10-20) */
+  paidBy: 'partner' | null;
   categoryId: number | null;
   projectId: number | null;
   /** какого числа; в коротком месяце — его последний день */
@@ -38,7 +41,7 @@ export interface RecurringMonth extends Recurring {
 }
 
 const row = (r: any): Recurring => ({
-  id: r.id, name: r.name, amount: r.amount, currency: r.currency, walletId: r.wallet_id,
+  id: r.id, name: r.name, amount: r.amount, currency: r.currency, walletId: r.wallet_id ?? null, paidBy: r.paid_by === 'partner' ? 'partner' : null,
   categoryId: r.category_id ?? null, projectId: r.project_id ?? null, day: r.day, active: r.active === 1,
 });
 
@@ -78,11 +81,15 @@ function fields(db: Db, input: Record<string, unknown>, current?: Recurring) {
     if (!s) throw new MoneyInputError('что за расход — например, «Сервер Aeza»');
     return s;
   }, current?.name);
-  const walletId = pick('walletId', (v) => getWallet(db, Number(v)).id, current?.walletId);
+  // кто платит: партнёр — без кошелька, но только в проекте с партнёром
+  const paidBy: 'partner' | null = input.paidBy === undefined ? current?.paidBy ?? null : input.paidBy === 'partner' ? 'partner' : null;
+  const walletId = paidBy === 'partner'
+    ? null
+    : pick('walletId', (v) => getWallet(db, Number(v)).id, current?.walletId ?? undefined);
   const currency = pick('currency', (v) => {
     const s = String(v ?? '').trim().toUpperCase();
-    return s || getWallet(db, walletId).currency;
-  }, current?.currency ?? getWallet(db, walletId).currency);
+    return s || (walletId === null ? 'RUB' : getWallet(db, walletId).currency);
+  }, current?.currency ?? (walletId === null ? 'RUB' : getWallet(db, walletId).currency));
   if (!/^[A-Z]{2,6}$/.test(currency)) throw new MoneyInputError('валюта — код вроде RUB, USD, USDT');
   const amount = pick('amount', (v) => parseAmount(v), current?.amount);
   const day = pick('day', (v) => {
@@ -98,14 +105,17 @@ function fields(db: Db, input: Record<string, unknown>, current?: Recurring) {
   };
   const categoryId = input.categoryId === undefined ? current?.categoryId ?? null : optRef('categories')(input.categoryId);
   const projectId = input.projectId === undefined ? current?.projectId ?? null : optRef('projects')(input.projectId);
-  return { name, walletId, currency, amount, day, categoryId, projectId };
+  if (paidBy === 'partner' && !listProjects(db).find((p) => p.id === projectId)?.partnerPct) {
+    throw new MoneyInputError('платит партнёр — выберите проект с партнёром');
+  }
+  return { name, walletId, currency, amount, day, categoryId, projectId, paidBy };
 }
 
 export function createRecurring(db: Db, input: Record<string, unknown>, now = Date.now()): number {
   const f = fields(db, input);
   return Number(
-    db.prepare('INSERT INTO recurring (name, amount, currency, wallet_id, category_id, project_id, day, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(f.name, f.amount, f.currency, f.walletId, f.categoryId, f.projectId, f.day, now).lastInsertRowid
+    db.prepare('INSERT INTO recurring (name, amount, currency, wallet_id, category_id, project_id, day, paid_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(f.name, f.amount, f.currency, f.walletId, f.categoryId, f.projectId, f.day, f.paidBy, now).lastInsertRowid
   );
 }
 
@@ -119,8 +129,8 @@ export function updateRecurring(db: Db, id: number, input: Record<string, unknow
   const cur = getRecurring(db, id);
   const f = fields(db, input, cur);
   const active = input.active === undefined ? cur.active : !!input.active;
-  db.prepare('UPDATE recurring SET name = ?, amount = ?, currency = ?, wallet_id = ?, category_id = ?, project_id = ?, day = ?, active = ? WHERE id = ?')
-    .run(f.name, f.amount, f.currency, f.walletId, f.categoryId, f.projectId, f.day, active ? 1 : 0, id);
+  db.prepare('UPDATE recurring SET name = ?, amount = ?, currency = ?, wallet_id = ?, category_id = ?, project_id = ?, day = ?, paid_by = ?, active = ? WHERE id = ?')
+    .run(f.name, f.amount, f.currency, f.walletId, f.categoryId, f.projectId, f.day, f.paidBy, active ? 1 : 0, id);
 }
 
 /** Удаление не трогает записанные расходы — это уже прошлое. */
@@ -136,13 +146,15 @@ export function deleteRecurring(db: Db, id: number): void {
 /**
  * «Записать»: расход месяца — сумма в валюте кошелька (страница и бот уже
  * пересчитали, если валюта расхода другая). Вид, проект и заметка — из
- * регулярного; расход проекта с партнёром уменьшит долг перед ним.
+ * регулярного; расход проекта с партнёром уменьшит долг перед ним. Платит
+ * партнёр — расход без кошелька, сумма в `currency` (по умолчанию — валюта
+ * регулярного), и владелец остаётся должен ему её за вычетом его доли.
  */
 export function payRecurring(
   db: Db,
   id: number,
   month: string,
-  input: { walletId: number; amount: number; rate: number; at: number },
+  input: { walletId: number | null; amount: number; rate: number; at: number; currency?: string },
   now = Date.now()
 ): number {
   if (!MONTH.test(month)) throw new MoneyInputError('месяц — в виде 2026-10');
@@ -150,12 +162,12 @@ export function payRecurring(
   if (db.prepare('SELECT 1 FROM operations WHERE source = ? AND source_ref = ?').get(SOURCE, refOf(id, month))) {
     throw new MoneyInputError(`«${r.name}» за этот месяц уже записан`);
   }
+  const base = { at: input.at, amount: input.amount, rate: input.rate, categoryId: r.categoryId, projectId: r.projectId, note: r.name, source: SOURCE, sourceRef: refOf(id, month) };
   return db.transaction(() => {
     db.prepare('DELETE FROM recurring_skips WHERE recurring_id = ? AND month = ?').run(id, month);
-    return addExpense(db, {
-      at: input.at, walletId: input.walletId, amount: input.amount, rate: input.rate,
-      categoryId: r.categoryId, projectId: r.projectId, note: r.name, source: SOURCE, sourceRef: refOf(id, month),
-    }, now);
+    if (r.paidBy === 'partner') return addPartnerExpense(db, { ...base, currency: input.currency ?? r.currency }, now);
+    if (input.walletId == null) throw new MoneyInputError('с какого кошелька?');
+    return addExpense(db, { ...base, walletId: input.walletId }, now);
   })();
 }
 

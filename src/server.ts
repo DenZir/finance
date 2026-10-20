@@ -11,8 +11,8 @@ import type { Config } from './config.js';
 import { SESSION_COOKIE, SESSION_MS, checkTelegramLogin, createSession, dropSession, sessionUser } from './auth.js';
 import { MoneyInputError, parseAmount, parsePct, parseRate } from './money.js';
 import {
-  WALLET_KINDS, addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
-  createCategory, createProject, incomeSeries, listCatalog, listCategories, updateCategory, updateProject, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet, yearReport,
+  WALLET_KINDS, addAdjustment, addExpense, addIncome, addPartnerExpense, addPayin, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
+  createCategory, createProject, incomeSeries, listCatalog, listCategories, updateCategory, updateProject, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, partnerSettlement, updateWallet, yearReport,
   type Wallet,
   type WalletKind,
 } from './ledger.js';
@@ -160,6 +160,12 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
           break;
         }
         case 'expense': {
+          // платил партнёр — расход без кошелька, в валюте, в которой он платил
+          if (b.paidBy === 'partner') {
+            const currency = String(b.currency || 'RUB').trim().toUpperCase();
+            id = addPartnerExpense(db, { ...base, amount: parseAmount(b.amount), currency, categoryId: optId(b.categoryId), rate: await rateFor(currency, b.rate) }, now());
+            break;
+          }
           const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
           id = addExpense(db, { ...base, walletId: w.id, amount: parseAmount(b.amount), categoryId: optId(b.categoryId), rate: await rateFor(w.currency, b.rate) }, now());
           break;
@@ -173,9 +179,11 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
           }, now());
           break;
         }
-        case 'payout': {
+        case 'payout':
+        case 'payin': {
           const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
-          id = addPayout(db, { ...base, walletId: w.id, amount: parseAmount(b.amount), projectId: reqId(b.projectId, 'проект'), rate: await rateFor(w.currency, b.rate) }, now());
+          const input = { ...base, walletId: w.id, amount: parseAmount(b.amount), projectId: reqId(b.projectId, 'проект'), rate: await rateFor(w.currency, b.rate) };
+          id = b.kind === 'payout' ? addPayout(db, input, now()) : addPayin(db, input, now());
           break;
         }
         case 'adjust': {
@@ -296,6 +304,11 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
     res.json({ ok: true });
   });
 
+  // --- расчёт с партнёром проекта (VPN): кто сколько оплатил и кто кому докидывает ---------
+  app.get('/api/partner-settlement', (_req, res) => {
+    res.json(partnerDebts(db).map((d) => partnerSettlement(db, d.projectId)));
+  });
+
   // --- регулярные расходы ---------------------------------------------------------------
   // Месяц и сегодня — по Москве, как всё остальное.
   const mskToday = () => new Date(now() + 3 * 3600_000).toISOString().slice(0, 10);
@@ -327,9 +340,13 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   app.post('/api/recurring/:id/pay', async (req, res, next) => {
     try {
       const b = req.body ?? {};
-      const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
-      const id = payRecurring(db, reqId(req.params.id, 'регулярный расход'), String(b.month ?? ''), {
-        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+      const rid = reqId(req.params.id, 'регулярный расход');
+      const r = listRecurring(db, mskToday().slice(0, 7), mskToday()).find((x) => x.id === rid);
+      // платит партнёр — кошелька нет, сумма и курс — в валюте регулярного
+      const w = r?.paidBy === 'partner' ? null : getWallet(db, reqId(b.walletId, 'кошелёк'));
+      const currency = w ? w.currency : r?.currency ?? 'RUB';
+      const id = payRecurring(db, rid, String(b.month ?? ''), {
+        walletId: w?.id ?? null, amount: parseAmount(b.amount), rate: await rateFor(currency, b.rate), at: Number(b.at) || now(), currency,
       }, now());
       res.json({ id });
     } catch (err) {

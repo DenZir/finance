@@ -10,7 +10,7 @@ import { MoneyInputError, parsePct, pctOf, toRub } from './money.js';
 
 export type WalletKind = 'provider' | 'crypto' | 'card' | 'cash';
 export const WALLET_KINDS: readonly WalletKind[] = ['provider', 'crypto', 'card', 'cash'];
-export type OpKind = 'income' | 'expense' | 'transfer' | 'payout' | 'adjust';
+export type OpKind = 'income' | 'expense' | 'transfer' | 'payout' | 'payin' | 'adjust';
 
 export interface Wallet {
   id: number;
@@ -227,21 +227,60 @@ export function addTransfer(
   })();
 }
 
-/** Выплата партнёру его доли по проекту — уменьшает долг перед ним. */
-export function addPayout(
-  db: Db,
-  input: OpBase & { walletId: number; amount: number; rate: number; projectId: number },
-  now = Date.now()
-): number {
-  const wallet = getWallet(db, input.walletId);
-  const project = listProjects(db).find((p) => p.id === input.projectId);
+function partnerProject(db: Db, projectId: number | null | undefined): Project {
+  if (projectId == null) throw new MoneyInputError('выберите проект с партнёром');
+  const project = listProjects(db).find((p) => p.id === projectId);
   if (!project) throw new MoneyInputError('такого проекта нет');
   if (!project.partnerPct) throw new MoneyInputError(`у проекта «${project.name}» нет партнёра`);
+  return project;
+}
+
+/**
+ * Расчёт с партнёром деньгами: «Партнёру» — владелец докидывает ему (payout,
+ * долг перед ним меньше), «От партнёра» — партнёр докидывает владельцу разницу
+ * (payin, его долг меньше). Ни то ни другое не доход и не расход.
+ */
+function addSettlement(db: Db, kind: 'payout' | 'payin', input: OpBase & { walletId: number; amount: number; rate: number; projectId: number }, now: number): number {
+  const wallet = getWallet(db, input.walletId);
+  partnerProject(db, input.projectId);
+  const rub = toRub(input.amount, input.rate);
+  const sign = kind === 'payout' ? -1 : 1;
+  return db.transaction(() => {
+    const id = insertOp(db, kind, input, null, rub, 0, now);
+    insertEntry(db, id, wallet.id, sign * input.amount, sign * rub);
+    recomputeAdjustments(db);
+    return id;
+  })();
+}
+
+/** Выплата партнёру его доли по проекту — уменьшает долг перед ним. */
+export function addPayout(db: Db, input: OpBase & { walletId: number; amount: number; rate: number; projectId: number }, now = Date.now()): number {
+  return addSettlement(db, 'payout', input, now);
+}
+
+/** Партнёр докинул разницу — деньги на кошелёк владельца, его долг меньше. */
+export function addPayin(db: Db, input: OpBase & { walletId: number; amount: number; rate: number; projectId: number }, now = Date.now()): number {
+  return addSettlement(db, 'payin', input, now);
+}
+
+/**
+ * Расход проекта, который партнёр оплатил из своих денег: кошельки владельца не
+ * трогает, а в расходы проекта, в итоги и в «Чистыми» входит, как любой другой.
+ * Владелец остаётся должен партнёру эту сумму за вычетом его доли (partnerDebts).
+ */
+export function addPartnerExpense(
+  db: Db,
+  input: OpBase & { amount: number; currency: string; rate: number; categoryId?: number | null },
+  now = Date.now()
+): number {
+  partnerProject(db, input.projectId);
+  const currency = String(input.currency ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2,6}$/.test(currency)) throw new MoneyInputError('валюта — код вроде RUB, USD, USDT');
+  if (!(input.amount > 0)) throw new MoneyInputError('сумма больше нуля');
   const rub = toRub(input.amount, input.rate);
   return db.transaction(() => {
-    const id = insertOp(db, 'payout', input, null, rub, 0, now);
-    insertEntry(db, id, wallet.id, -input.amount, -rub);
-    recomputeAdjustments(db);
+    const id = insertOp(db, 'expense', input, checkRef(db, 'categories', input.categoryId, 'expense'), rub, 0, now);
+    db.prepare("UPDATE operations SET paid_by = 'partner', paid_amount = ?, paid_currency = ? WHERE id = ?").run(input.amount, currency, id);
     return id;
   })();
 }
@@ -287,6 +326,10 @@ export interface OperationRow {
   source: string;
   /** у «Остатка» — вписанный остаток, микро в валюте кошелька */
   target: number | null;
+  /** расход оплатил партнёр — проводок нет, сумма в его валюте здесь */
+  paidBy: 'partner' | null;
+  paidAmount: number | null;
+  paidCurrency: string | null;
   entries: { walletId: number; amount: number; rub: number }[];
 }
 
@@ -299,6 +342,7 @@ export function listOperations(db: Db, from: number, to: number): OperationRow[]
   return ops.map((o) => ({
     id: o.id, kind: o.kind, at: o.at, projectId: o.project_id, categoryId: o.category_id, note: o.note,
     grossRub: o.gross_rub, feeRub: o.fee_rub, source: o.source, target: o.target ?? null,
+    paidBy: o.paid_by ?? null, paidAmount: o.paid_amount ?? null, paidCurrency: o.paid_currency ?? null,
     entries: entries.filter((e) => e.op_id === o.id).map((e) => ({ walletId: e.wallet_id, amount: e.amount, rub: e.rub })),
   }));
 }
@@ -309,23 +353,90 @@ export function balances(db: Db): Map<number, number> {
   return new Map(rows.map((r) => [r.id, r.sum]));
 }
 
+/** Деньги проекта с партнёром за период — из чего складывается расчёт с ним. */
+export interface PartnerSums {
+  /** доход за вычетом комиссий — оплаты лежат у владельца */
+  income: number;
+  /** расходы, которые оплатил владелец */
+  expenseOwner: number;
+  /** расходы, которые оплатил партнёр из своих денег */
+  expensePartner: number;
+  /** владелец докинул партнёру */
+  paidOut: number;
+  /** партнёр докинул владельцу */
+  paidIn: number;
+}
+export interface PartnerDebt extends PartnerSums {
+  projectId: number;
+  name: string;
+  pct: number;
+  /** доля партнёра в доходе и в расходах */
+  incomeShare: number;
+  expenseShare: number;
+  /** сколько владелец должен партнёру; отрицательное — партнёр должен владельцу */
+  owed: number;
+  /** прежние имена: весь расход и выплаченное партнёру */
+  expense: number;
+  paid: number;
+}
+
 /**
- * Сколько владелец должен партнёру по каждому проекту с партнёром: доля от
- * дохода за вычетом комиссий, минус доля расходов, минус уже выплаченное.
- * Отрицательное — партнёр должен владельцу.
+ * Сколько владелец должен партнёру: его доля дохода за вычетом комиссий, минус
+ * его доля всех расходов — кто бы их ни оплатил, — плюс то, что партнёр оплатил
+ * сам, минус то, что владелец ему докинул, плюс то, что партнёр докинул
+ * владельцу. Пример пополам: доход 20 000, владелец заплатил 2 000, партнёр
+ * 3 000 → 10 000 − 2 500 + 3 000 = 10 500; у обоих остаётся по 7 500.
  */
-export function partnerDebts(db: Db): { projectId: number; name: string; pct: number; income: number; expense: number; paid: number; owed: number }[] {
+export function owedFrom(s: PartnerSums, pct: number): number {
+  return pctOf(s.income, pct) - pctOf(s.expenseOwner + s.expensePartner, pct) + s.expensePartner - s.paidOut + s.paidIn;
+}
+
+const PARTNER_SUMS = `
+  COALESCE(SUM(CASE WHEN kind = 'income' THEN gross_rub - fee_rub END), 0) AS income,
+  COALESCE(SUM(CASE WHEN kind = 'expense' AND paid_by IS NULL THEN gross_rub END), 0) AS expenseOwner,
+  COALESCE(SUM(CASE WHEN kind = 'expense' AND paid_by = 'partner' THEN gross_rub END), 0) AS expensePartner,
+  COALESCE(SUM(CASE WHEN kind = 'payout' THEN gross_rub END), 0) AS paidOut,
+  COALESCE(SUM(CASE WHEN kind = 'payin' THEN gross_rub END), 0) AS paidIn`;
+
+export function partnerDebts(db: Db): PartnerDebt[] {
   return listProjects(db)
     .filter((p) => p.partnerPct > 0)
     .map((p) => {
-      const sum = (kind: OpKind, col: string) =>
-        (db.prepare(`SELECT COALESCE(SUM(${col}), 0) AS s FROM operations WHERE project_id = ? AND kind = ?`).get(p.id, kind) as { s: number }).s;
-      const income = sum('income', 'gross_rub - fee_rub');
-      const expense = sum('expense', 'gross_rub');
-      const paid = sum('payout', 'gross_rub');
-      const owed = pctOf(income, p.partnerPct) - pctOf(expense, p.partnerPct) - paid;
-      return { projectId: p.id, name: p.name, pct: p.partnerPct, income, expense, paid, owed };
+      const s = db.prepare(`SELECT ${PARTNER_SUMS} FROM operations WHERE project_id = ?`).get(p.id) as PartnerSums;
+      return {
+        projectId: p.id, name: p.name, pct: p.partnerPct, ...s,
+        incomeShare: pctOf(s.income, p.partnerPct), expenseShare: pctOf(s.expenseOwner + s.expensePartner, p.partnerPct),
+        owed: owedFrom(s, p.partnerPct), expense: s.expenseOwner + s.expensePartner, paid: s.paidOut,
+      };
     });
+}
+
+/**
+ * Расшифровка расчёта с партнёром по месяцам (по Москве): что набежало за месяц
+ * и сколько владелец должен на его конец. Плюс сами операции расчёта — расходы,
+ * оплаченные партнёром, и выплаты в обе стороны.
+ */
+export function partnerSettlement(db: Db, projectId: number) {
+  const p = partnerProject(db, projectId);
+  const rows = db
+    .prepare(`SELECT strftime('%Y-%m', (at + 10800000) / 1000, 'unixepoch') AS month, ${PARTNER_SUMS}
+              FROM operations WHERE project_id = ? GROUP BY month ORDER BY month`)
+    .all(p.id) as (PartnerSums & { month: string })[];
+  let balance = 0;
+  const months = rows.map((r) => {
+    const accrued = owedFrom({ ...r, paidOut: 0, paidIn: 0 }, p.partnerPct);
+    balance += accrued - r.paidOut + r.paidIn;
+    return { ...r, accrued, owed: balance };
+  });
+  const ops = db
+    .prepare(`SELECT o.id, o.kind, o.at, o.category_id AS categoryId, o.note, o.gross_rub AS grossRub,
+                     o.paid_amount AS paidAmount, o.paid_currency AS paidCurrency,
+                     (SELECT wallet_id FROM entries e WHERE e.op_id = o.id LIMIT 1) AS walletId
+              FROM operations o
+              WHERE o.project_id = ? AND (o.kind IN ('payout', 'payin') OR o.paid_by = 'partner')
+              ORDER BY o.at DESC, o.id DESC LIMIT 200`)
+    .all(p.id);
+  return { ...partnerDebts(db).find((d) => d.projectId === p.id)!, months, ops };
 }
 
 export interface MonthReport {

@@ -19,6 +19,7 @@ import {
 import { currentRate, type RateFetcher } from './rates.js';
 import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
 import { listUnsorted, resolveVpn } from './vpn.js';
+import { createWelcome, deleteFix, deleteWelcome, fixWelcome, listWelcome, payFix, updateWelcome, welcomeDebts } from './welcome.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -104,6 +105,10 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
         partners: partnerDebts(db),
         totals: { onProviders: sum((w) => w.kind === 'provider'), onWallets: sum((w) => w.kind !== 'provider') },
         ads: adDebts(db),
+        welcome: (() => {
+          const debts = welcomeDebts(db);
+          return { owed: debts.reduce((s, d) => s + d.amount, 0), count: debts.length };
+        })(),
       });
     } catch (err) {
       next(err);
@@ -186,6 +191,41 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   app.post('/api/ad-deals/bulk', (req, res) => {
     const b = req.body ?? {};
     res.json(bulkMark(db, b.refs, b.action, now()));
+  });
+
+  // --- приветка ------------------------------------------------------------------
+  app.get('/api/welcome', (_req, res) => {
+    res.json(listWelcome(db));
+  });
+  app.post('/api/welcome', (req, res) => {
+    res.json({ id: createWelcome(db, req.body ?? {}, now()) });
+  });
+  app.patch('/api/welcome/:id', (req, res) => {
+    updateWelcome(db, reqId(req.params.id, 'размещение'), req.body ?? {});
+    res.json({ ok: true });
+  });
+  app.delete('/api/welcome/:id', (req, res) => {
+    deleteWelcome(db, reqId(req.params.id, 'размещение'));
+    res.json({ ok: true });
+  });
+  app.post('/api/welcome/:id/fix', (req, res) => {
+    res.json(fixWelcome(db, reqId(req.params.id, 'размещение'), req.body ?? {}, now()));
+  });
+  app.delete('/api/welcome-fix/:id', (req, res) => {
+    deleteFix(db, reqId(req.params.id, 'фиксация'));
+    res.json({ ok: true });
+  });
+  app.post('/api/welcome-fix/:id/pay', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
+      const id = payFix(db, reqId(req.params.id, 'фиксация'), {
+        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+      }, now());
+      res.json({ id });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // --- VPN ---------------------------------------------------------------------

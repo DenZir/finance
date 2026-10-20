@@ -13,6 +13,7 @@ import { describe, BotApiError, type BotApi, type Keyboard, type TgCallbackQuery
 import { QuickEntry, type Outcome } from './draft.js';
 import { balanceText } from './balance.js';
 import { debtsText, lastReminderDay, markReminderDay, reminderDue } from './debts.js';
+import { welcomeDebts } from '../welcome.js';
 import { mskDayStart, mskIso } from './text.js';
 
 export interface BotDeps {
@@ -51,7 +52,7 @@ export function createBot(deps: BotDeps) {
 
   const send = (chatId: number, text: string, keyboard?: Keyboard) => api.sendMessage(chatId, text, keyboard);
   const openPage: Keyboard | undefined = deps.publicUrl ? [[{ text: 'Открыть «Деньги»', url: deps.publicUrl }]] : undefined;
-  const debtsNow = () => debtsText(listDeals(db), mskIso(now()));
+  const debtsNow = () => debtsText(listDeals(db), mskIso(now()), welcomeDebts(db));
 
   async function command(chatId: number, cmd: string): Promise<void> {
     switch (cmd) {

@@ -1,37 +1,58 @@
 /**
- * Долги по рекламе в боте: сделки с отметкой «Ждём оплату» (ads.ts) — продажи
- * «Нам должны», закупы «Мы должны». Раз в день — напоминание о тех, чей день
+ * Долги в боте: сделки рекламы с отметкой «Ждём оплату» (ads.ts) — продажи
+ * «Нам должны», закупы «Мы должны»; неоплаченные фиксации приветки (welcome.ts)
+ * — тоже «Нам должны». Раз в день — напоминание о тех, чей день
  * уже наступил: реклама, которая ещё не вышла, — пока не долг.
  */
 import type { Db } from '../db/index.js';
 import type { AdDealView } from '../ads.js';
+import type { WelcomeDebt } from '../welcome.js';
 import { DAY, ddmm, esc, mskDayStart, rub } from './text.js';
 
 /** Места — как на странице. */
 const SLOT_NAMES: Record<string, string> = { morning: 'утро', day: 'день', evening: 'вечер', night: 'ночь', stories: 'сторисы', n9: '9:00', n17: '17:00' };
 
-/** Текст долгов на сегодня (ГГГГ-ММ-ДД по Москве); null — никто никому не должен. */
-export function debtsText(deals: readonly AdDealView[], today: string): string | null {
-  const due = deals
-    .filter((d) => d.state === 'waiting' && !d.cancelled && d.date <= today)
-    // самые давние сверху: им пора напомнить первыми
-    .sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
-  const block = (title: string, list: AdDealView[]) => {
+interface DebtLine {
+  who: string;
+  /** ₽-микро; null — сумма ещё не известна (CPM ждёт просмотров) */
+  amount: number | null;
+  what: string;
+  date: string;
+  key: string;
+}
+
+/**
+ * Текст долгов на сегодня (ГГГГ-ММ-ДД по Москве); null — никто никому не должен.
+ * «Нам должны» — продажи рекламы «Ждём оплату» и неоплаченные фиксации приветки.
+ */
+export function debtsText(deals: readonly AdDealView[], today: string, welcome: readonly WelcomeDebt[] = []): string | null {
+  const due = deals.filter((d) => d.state === 'waiting' && !d.cancelled && d.date <= today);
+  const adLine = (d: AdDealView): DebtLine => ({
+    who: d.contact || d.channels || 'без контакта',
+    amount: d.amount,
+    what: `${SLOT_NAMES[d.slot] ?? d.slot} ${ddmm(d.date)}`,
+    date: d.date,
+    key: d.ref,
+  });
+  const block = (title: string, list: DebtLine[]) => {
     if (!list.length) return null;
+    // самые давние сверху: им пора напомнить первыми
+    list.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
     const known = list.reduce((s, d) => s + (d.amount ?? 0), 0);
     const unknown = list.filter((d) => d.amount === null).length;
-    // CPM ждёт просмотров — суммы ещё нет, но сам долг есть
     const total = unknown && !known ? 'сумма ещё не известна' : `${rub(known)}${unknown ? ` + ещё ${unknown} без суммы` : ''}`;
     const lines = list.map((d) => {
       const days = Math.round((Date.parse(today) - Date.parse(d.date)) / DAY);
-      return `• ${esc(d.contact || d.channels || 'без контакта')} — ${d.amount === null ? 'сумма ещё не известна' : rub(d.amount)}`
-        + ` · ${esc(SLOT_NAMES[d.slot] ?? d.slot)} ${ddmm(d.date)} · ${days ? `${days} дн.` : 'сегодня'}`;
+      return `• ${esc(d.who)} — ${d.amount === null ? 'сумма ещё не известна' : rub(d.amount)} · ${esc(d.what)} · ${days ? `${days} дн.` : 'сегодня'}`;
     });
     return [`${title} ${total}`, ...lines].join('\n');
   };
   const blocks = [
-    block('💸 Нам должны', due.filter((d) => d.kind === 'sale')),
-    block('🧾 Мы должны', due.filter((d) => d.kind === 'buy')),
+    block('💸 Нам должны', [
+      ...due.filter((d) => d.kind === 'sale').map(adLine),
+      ...welcome.map((w, i) => ({ who: w.contact, amount: w.amount, what: `приветка, ${w.count} заявок на ${ddmm(w.onDate)}`, date: w.onDate, key: `w${i}` })),
+    ]),
+    block('🧾 Мы должны', due.filter((d) => d.kind === 'buy').map(adLine)),
   ].filter((b) => b !== null);
   return blocks.length ? blocks.join('\n\n') : null;
 }

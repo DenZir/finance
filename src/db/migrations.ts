@@ -187,4 +187,27 @@ export const MIGRATIONS: readonly string[] = [
   UPDATE wallets SET currency = 'USD'
   WHERE role = 'vpn:lolzteam' AND NOT EXISTS (SELECT 1 FROM entries WHERE entries.wallet_id = wallets.id);
   `,
+  `
+  -- «Приветка»: ссылка покупателя в приветке владельца, оплата за заявки (welcome.ts).
+  CREATE TABLE welcome_deals (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact    TEXT    NOT NULL,             -- кто: имя или @username
+    price      INTEGER NOT NULL,             -- ₽-микро за заявку
+    started_on TEXT    NOT NULL,             -- ГГГГ-ММ-ДД
+    stopped_on TEXT,                         -- null — ещё идёт
+    note       TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  -- Фиксация: покупатель прислал, сколько заявок всего с начала.
+  CREATE TABLE welcome_fixes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    deal_id    INTEGER NOT NULL REFERENCES welcome_deals(id),
+    on_date    TEXT    NOT NULL,
+    total      INTEGER NOT NULL,             -- всего с начала, как прислал
+    count      INTEGER NOT NULL,             -- новых с прошлой фиксации
+    amount     INTEGER NOT NULL,             -- ₽-микро: count × цена на тот момент
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX welcome_fixes_deal ON welcome_fixes(deal_id);
+  `,
 ];

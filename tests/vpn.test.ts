@@ -5,7 +5,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
 import { migrate, openDb } from '../src/db/index.js';
+import { MIGRATIONS } from '../src/db/migrations.js';
 import { MICRO } from '../src/money.js';
 import { balances, deleteOperation, listCategories, listOperations, listProjects, listWallets, monthRange, partnerDebts } from '../src/ledger.js';
 import { listUnsorted, resolveVpn, syncVpn, type AnalyticsPayment } from '../src/vpn.js';
@@ -102,9 +104,12 @@ test('карта резерв (рубли) и Lolzteam (доллары): сво�
 
 test('Lolzteam с уже записанными рублёвыми оплатами валюту не меняет', () => {
   // как было бы, если до обновления оплаты успели лечь на рублёвый Lolzteam VPN
-  const db = openDb(':memory:');
-  db.pragma('user_version = 7');
-  db.exec("UPDATE wallets SET currency = 'RUB' WHERE role = 'vpn:lolzteam'");
+  // база до обновления: применены миграции по рублёвый Lolzteam включительно
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  const lolzUsd = MIGRATIONS.findIndex((m) => m.includes("SET currency = 'USD'"));
+  for (const m of MIGRATIONS.slice(0, lolzUsd)) db.exec(m);
+  db.pragma(`user_version = ${lolzUsd}`);
   const id = listWallets(db).find((x) => x.role === 'vpn:lolzteam')!.id;
   db.prepare("INSERT INTO operations (kind, at, created_at) VALUES ('income', 1, 1)").run();
   db.prepare('INSERT INTO entries (op_id, wallet_id, amount, rub) VALUES (last_insert_rowid(), ?, ?, ?)').run(id, rub(300), rub(300));

@@ -37,6 +37,9 @@ npm run typecheck  # tsc --noEmit
 - `src/rates.ts` — курсы к рублю (CoinGecko + последний известный в базе).
 - `src/auth.ts` — проверка подписи Telegram Login и сессии.
 - `src/server.ts` — API и раздача `public/`.
+- `public/` — страница в оформлении tg-analytics (те же токены, шрифты, меню
+  разделов, плашки, карточки «01 / …»): меняя вид, держать в согласии с ней.
+  Разделы — экраны `#scr-<имя>`, раздел в адресе (`/#ads`).
 - `src/import/botprivat.ts` — оплаты привата из ботприватa; `src/ads.ts` — сделки
   рекламы из tg-analytics (оплачено / ждём оплату / бартер); `src/vpn.ts` —
   оплаты VPN из tg-analytics на кошельки с ролью `vpn:platega` / `vpn:cryptobot`;

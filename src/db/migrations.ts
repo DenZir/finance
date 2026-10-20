@@ -180,4 +180,11 @@ export const MIGRATIONS: readonly string[] = [
     ('Карта резерв VPN', 'RUB', 'provider', 10, CAST(strftime('%s','now') AS INTEGER) * 1000, 'vpn:card_ru'),
     ('Lolzteam VPN', 'RUB', 'provider', 7, CAST(strftime('%s','now') AS INTEGER) * 1000, 'vpn:lolzteam');
   `,
+  `
+  -- Lolzteam платит в долларах, а не в рублях (владелец, 2026-10-20). Кошелёк
+  -- без проводок просто меняет валюту; с проводками — нет: их суммы записаны в
+  -- рублях, и смена валюты молча превратила бы 300 ₽ в 300 $.
+  UPDATE wallets SET currency = 'USD'
+  WHERE role = 'vpn:lolzteam' AND NOT EXISTS (SELECT 1 FROM entries WHERE entries.wallet_id = wallets.id);
+  `,
 ];

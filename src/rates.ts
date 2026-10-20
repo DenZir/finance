@@ -18,10 +18,29 @@ const COINGECKO_IDS: Record<string, string> = {
   BNB: 'binancecoin',
 };
 
+/** Обычные деньги: у CoinGecko это не монеты, а курсы к биткоину. */
+const FIAT = new Set(['USD', 'EUR']);
+
 /** Достаёт курс снаружи. Подменяется в тестах. */
 export type RateFetcher = (currency: string) => Promise<number | null>;
 
+/** Доллар (Lolzteam платит в нём) и евро — через курсы к биткоину: рубль ÷ валюта. */
+async function fiatRate(currency: string): Promise<number | null> {
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/exchange_rates', { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const rates = ((await res.json()) as { rates?: Record<string, { value?: number }> }).rates ?? {};
+    const rub = rates.rub?.value;
+    const cur = rates[currency.toLowerCase()]?.value;
+    return typeof rub === 'number' && typeof cur === 'number' && rub > 0 && cur > 0 ? rub / cur : null;
+  } catch (err) {
+    console.warn(`[rates] CoinGecko не ответил по ${currency}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 export const coingecko: RateFetcher = async (currency) => {
+  if (FIAT.has(currency)) return fiatRate(currency);
   const id = COINGECKO_IDS[currency];
   if (!id) return null;
   try {

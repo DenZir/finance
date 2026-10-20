@@ -120,7 +120,7 @@ test('«1 500 ₽» на CryptoBot: пересчёт в USDT до центов, 
   assert.match(plain(draft.params.text), /^Расход · 1 500 ₽\nКошелёк: Platega\n/, 'рубли — на рублёвый кошелёк');
   await s.bot.handleUpdate(press(OWNER, 100, button(draft, 'Кошелёк')));
   const list = s.last('editMessageText');
-  assert.deepEqual(buttons(list).map((b) => b.text), ['✓ Platega · RUB', 'CryptoBot · USDT', 'Platega VPN · RUB', 'CryptoBot VPN · USDT', 'Карта резерв VPN · RUB', 'Lolzteam VPN · RUB', '‹ Назад']);
+  assert.deepEqual(buttons(list).map((b) => b.text), ['✓ Platega · RUB', 'CryptoBot · USDT', 'Platega VPN · RUB', 'CryptoBot VPN · USDT', 'Карта резерв VPN · RUB', 'Lolzteam VPN · USD', '‹ Назад']);
   await s.bot.handleUpdate(press(OWNER, 100, button(list, 'CryptoBot')));
   const edit = s.last('editMessageText');
   assert.match(plain(edit.params.text), /^Расход · 1 500 ₽ ≈ 18,29 USDT\nКошелёк: CryptoBot\n/);
@@ -190,7 +190,7 @@ test('/balance: остатки в валюте и ≈ ₽, итоги, долг 
     'Platega VPN — 0 ₽',
     'CryptoBot VPN — 0 USDT ≈ 0 ₽',
     'Карта резерв VPN — 0 ₽',
-    'Lolzteam VPN — 0 ₽',
+    'Lolzteam VPN — 0 USD · курса нет',
     '',
     'На платёжках: 1 820 ₽',
     'На кошельках: 0 ₽',

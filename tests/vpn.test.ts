@@ -5,7 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb } from '../src/db/index.js';
+import { migrate, openDb } from '../src/db/index.js';
 import { MICRO } from '../src/money.js';
 import { balances, deleteOperation, listCategories, listOperations, listProjects, listWallets, monthRange, partnerDebts } from '../src/ledger.js';
 import { listUnsorted, resolveVpn, syncVpn, type AnalyticsPayment } from '../src/vpn.js';
@@ -78,7 +78,7 @@ test('оплаты VPN: платёжка из аналитики, разбор �
   assert.equal((await syncVpn(db2, deps, T)).booked, 1, 'со следующей сверкой — записана');
 });
 
-test('карта резерв и Lolzteam: свои рублёвые кабинеты VPN со своей комиссией, в том числе при разборе руками', async () => {
+test('карта резерв (рубли) и Lolzteam (доллары): свои кабинеты VPN со своей комиссией, в том числе при разборе руками', async () => {
   const db = openDb(':memory:');
   const deps = {
     fetchPayments: async (after: number) => ({
@@ -91,8 +91,23 @@ test('карта резерв и Lolzteam: свои рублёвые кабин�
   assert.deepEqual(await syncVpn(db, deps, T), { imported: 3, booked: 2, unsorted: 1, waiting: [] });
   const w = (role: string) => listWallets(db).find((x) => x.role === role)!;
   assert.equal(w('vpn:card_ru').currency, 'RUB');
+  assert.equal(w('vpn:lolzteam').currency, 'USD');
   assert.equal(balances(db).get(w('vpn:card_ru').id), rub(900), '1000 − 10 %');
-  assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(930), '1000 − 7 %, регистр платёжки не важен');
+  assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(9.3), '1000 ₽ = 10 $ по 100, − 7 %; регистр платёжки не важен');
   assert.deepEqual(await resolveVpn(db, ['3'], 'lolzteam', deps.fetchRate, T), { done: 1, skipped: 0 });
-  assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(930 + 465));
+  assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(9.3 + 4.65));
+  const op = listOperations(db, ...(Object.values(monthRange('2026-10')) as [number, number])).find((o) => o.entries[0]?.walletId === w('vpn:lolzteam').id && o.grossRub === rub(1000))!;
+  assert.deepEqual([op.grossRub, op.feeRub], [rub(1000), rub(70)], 'в отчёте — рубли оплаты и 7 % комиссии');
+});
+
+test('Lolzteam с уже записанными рублёвыми оплатами валюту не меняет', () => {
+  // как было бы, если до обновления оплаты успели лечь на рублёвый Lolzteam VPN
+  const db = openDb(':memory:');
+  db.pragma('user_version = 7');
+  db.exec("UPDATE wallets SET currency = 'RUB' WHERE role = 'vpn:lolzteam'");
+  const id = listWallets(db).find((x) => x.role === 'vpn:lolzteam')!.id;
+  db.prepare("INSERT INTO operations (kind, at, created_at) VALUES ('income', 1, 1)").run();
+  db.prepare('INSERT INTO entries (op_id, wallet_id, amount, rub) VALUES (last_insert_rowid(), ?, ?, ?)').run(id, rub(300), rub(300));
+  migrate(db);
+  assert.equal(listWallets(db).find((x) => x.role === 'vpn:lolzteam')!.currency, 'RUB');
 });

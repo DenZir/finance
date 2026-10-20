@@ -10,7 +10,7 @@ import { migrate, openDb } from '../src/db/index.js';
 import { MIGRATIONS } from '../src/db/migrations.js';
 import { MICRO } from '../src/money.js';
 import { balances, deleteOperation, listCategories, listOperations, listProjects, listWallets, monthRange, partnerDebts } from '../src/ledger.js';
-import { listUnsorted, resolveVpn, syncVpn, type AnalyticsPayment } from '../src/vpn.js';
+import { listSkipped, listUnsorted, resolveVpn, restoreVpn, syncVpn, type AnalyticsPayment } from '../src/vpn.js';
 
 const T = Date.UTC(2026, 9, 19, 9);
 const SINCE = Date.UTC(2026, 9, 1) - 3 * 3600_000;
@@ -134,4 +134,39 @@ test('card_ru → parity: кошелёк «Карта резерв VPN» и пр
   assert.deepEqual([w.role, w.name, w.feePct], ['vpn:parity', 'Parity VPN', 10]);
   assert.deepEqual(await syncVpn(db, { fetchPayments: async () => ({ more: false, payments: [] }), fetchRate: async () => 100, since: SINCE }, T), { imported: 0, booked: 1, unsorted: 0, waiting: [] });
   assert.equal(balances(db).get(id), rub(900), 'та же оплата — на тот же кошелёк, 1000 − 10 %');
+});
+
+// Крестик «Не учитывать» нажали по ошибке — раньше обратно никак (владелец, 2026-10-20).
+test('«Не учитывать» возвращается: без платёжки — в «Разобрать», с платёжкой — сразу доход', async () => {
+  const db = openDb(':memory:');
+  const deps = {
+    fetchPayments: async (after: number) => ({ payments: [pay(1, 150, null), pay(2, 300, null), pay(3, 400, null)].filter((p) => p.id > after), more: false }),
+    fetchRate: async () => 100,
+    since: SINCE,
+  };
+  await syncVpn(db, deps, T);
+  assert.deepEqual(await resolveVpn(db, ['1', '2'], 'skip', deps.fetchRate, T), { done: 2, skipped: 0 });
+  // платёжку оплаты 2 бот сказал позже, чем её отметили
+  db.prepare("UPDATE vpn_payments SET provider = 'platega' WHERE ref = '2'").run();
+  assert.deepEqual(listSkipped(db).map((p) => [p.ref, p.provider]), [['1', null], ['2', 'platega']]);
+  assert.deepEqual(listUnsorted(db).map((p) => p.ref), ['3']);
+
+  await assert.rejects(restoreVpn(db, [], deps.fetchRate, T), /не выбрано/);
+  await assert.rejects(restoreVpn(db, ['x'], deps.fetchRate, T), /не оплата/);
+  assert.deepEqual(await restoreVpn(db, ['1', '2', '3', '99'], deps.fetchRate, T), { done: 2, booked: 1, skipped: 2, waiting: [] }, 'не отмеченная и неизвестная пропущены');
+  assert.deepEqual(listSkipped(db), []);
+  assert.deepEqual(listUnsorted(db).map((p) => p.ref), ['1', '3'], 'без платёжки — снова в разборе');
+  const platega = listWallets(db).find((x) => x.role === 'vpn:platega')!.id;
+  assert.equal(balances(db).get(platega), rub(276), '300 − 8 %');
+  assert.equal((await syncVpn(db, deps, T)).booked, 0, 'сверка не задваивает');
+  assert.equal(balances(db).get(platega), rub(276));
+
+  // кошелька нет — отметка снята, а записать доходом можно будет следующей сверкой
+  await resolveVpn(db, ['3'], 'skip', deps.fetchRate, T);
+  db.prepare("UPDATE vpn_payments SET provider = 'parity' WHERE ref = '3'").run();
+  db.prepare("UPDATE wallets SET archived = 1 WHERE role = 'vpn:parity'").run();
+  const r = await restoreVpn(db, ['3'], deps.fetchRate, T);
+  assert.deepEqual([r.done, r.booked], [1, 0]);
+  assert.match(r.waiting[0]!, /vpn:parity/);
+  assert.deepEqual(listSkipped(db), []);
 });

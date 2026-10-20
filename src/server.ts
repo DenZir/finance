@@ -18,7 +18,7 @@ import {
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
 import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
-import { listUnsorted, resolveVpn } from './vpn.js';
+import { listSkipped, listUnsorted, resolveVpn, restoreVpn } from './vpn.js';
 import { createRecurring, deleteRecurring, listRecurring, payRecurring, skipRecurring, updateRecurring } from './recurring.js';
 import { partnerCheck, partnerCounted, partnerWallet } from './partner.js';
 import { createWelcome, deleteFix, deleteWelcome, fixWelcome, listWelcome, payFix, updateWelcome, welcomeDebts } from './welcome.js';
@@ -276,6 +276,18 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
     try {
       const b = req.body ?? {};
       res.json(await resolveVpn(db, b.refs, b.action, fetchRate, now()));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/vpn/skipped', (_req, res) => {
+    res.json(listSkipped(db));
+  });
+
+  app.post('/api/vpn/restore', async (req, res, next) => {
+    try {
+      res.json(await restoreVpn(db, (req.body ?? {}).refs, fetchRate, now()));
     } catch (err) {
       next(err);
     }

@@ -151,6 +151,58 @@ export function listUnsorted(db: Db): { ref: string; at: number; type: string; a
 const REF = /^\d{1,15}$/;
 const MAX_REFS = 500;
 
+function checkRefs(refs: unknown): string[] {
+  if (!Array.isArray(refs) || !refs.length) throw new MoneyInputError('не выбрано ни одной оплаты');
+  if (refs.length > MAX_REFS) throw new MoneyInputError(`за раз — не больше ${MAX_REFS} оплат`);
+  for (const r of refs) if (typeof r !== 'string' || !REF.test(r)) throw new MoneyInputError(`«${String(r).slice(0, 40)}» — не оплата`);
+  return [...new Set(refs as string[])];
+}
+
+/** «Не учтены»: оплаты, отмеченные «Не учитывать», — последние отмеченные сверху. */
+export function listSkipped(db: Db): { ref: string; at: number; type: string; amount: number; provider: Provider | null; skippedAt: number }[] {
+  return db
+    .prepare(
+      `SELECT v.ref, v.at, v.type, v.amount, v.provider, v.skipped_at AS skippedAt FROM vpn_payments v
+       WHERE v.skipped_at IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.source = '${SOURCE}' AND o.source_ref = v.ref)
+       ORDER BY v.skipped_at DESC, v.at DESC, v.ref`
+    )
+    .all() as ReturnType<typeof listSkipped>;
+}
+
+/**
+ * Вернуть из «Не учитывать» — по ошибке нажатый крестик (владелец, 2026-10-20).
+ * Оплата с известной платёжкой сразу ложится доходом, без неё — обратно в
+ * «Разобрать». Не отмеченные и неизвестные пропускаются.
+ */
+export async function restoreVpn(
+  db: Db,
+  refs: unknown,
+  fetchRate: RateFetcher,
+  now = Date.now()
+): Promise<{ done: number; booked: number; skipped: number; waiting: string[] }> {
+  const skippedRows = new Map(listSkipped(db).map((p) => [p.ref, p]));
+  let done = 0;
+  let bookedCount = 0;
+  let skipped = 0;
+  const waiting = new Set<string>();
+  for (const ref of checkRefs(refs)) {
+    const p = skippedRows.get(ref);
+    if (!p) {
+      skipped++;
+      continue;
+    }
+    db.prepare('UPDATE vpn_payments SET skipped_at = NULL WHERE ref = ?').run(ref);
+    done++;
+    if (!p.provider) continue;
+    // не вышло (нет кошелька, курса) — оплата не потеряна: её запишет следующая сверка
+    const why = await book(db, p, p.provider, fetchRate, now);
+    if (why) waiting.add(why);
+    else bookedCount++;
+  }
+  return { done, booked: bookedCount, skipped, waiting: [...waiting] };
+}
+
 /**
  * Владелец выбрал платёжку (или «Не учитывать») для одной или многих оплат.
  * Платёжка запоминается в оплате, так что удалённая потом операция вернётся
@@ -165,14 +217,12 @@ export async function resolveVpn(
   now = Date.now()
 ): Promise<{ done: number; skipped: number }> {
   if (action !== 'skip' && !isProvider(action)) throw new MoneyInputError('выберите платёжку: Platega, CryptoBot, Parity или Lolzteam');
-  if (!Array.isArray(refs) || !refs.length) throw new MoneyInputError('не выбрано ни одной оплаты');
-  if (refs.length > MAX_REFS) throw new MoneyInputError(`за раз — не больше ${MAX_REFS} оплат`);
-  for (const r of refs) if (typeof r !== 'string' || !REF.test(r)) throw new MoneyInputError(`«${String(r).slice(0, 40)}» — не оплата`);
+  const list = checkRefs(refs);
 
   const pending = new Map(pendingRows(db).map((p) => [p.ref, p]));
   let done = 0;
   let skipped = 0;
-  for (const ref of new Set(refs as string[])) {
+  for (const ref of list) {
     const p = pending.get(ref);
     if (!p) {
       skipped++;

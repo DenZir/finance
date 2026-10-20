@@ -316,6 +316,9 @@ tr.total td { font-weight: 700; border-bottom: 0; border-top: 1px solid var(--li
 .dlg form.cat-add { padding: 0; }
 .cat-sec details { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .cat-sec summary { cursor: pointer; }
+.vpn-skipped { margin-top: 16px; }
+.vpn-skipped summary { cursor: pointer; font: 600 10px var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--dim); padding: 4px 0; }
+.vpn-skipped summary:hover { color: var(--muted); }
 
 /* ============ ДОХОД: итог, доли, график, лента дней ============ */
 .inc-ctl { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 14px; }

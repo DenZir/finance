@@ -3,8 +3,8 @@
  *
  * VPN-бот — код партнёра, и обо всех его оплатах знает только аналитика: туда
  * бот сообщает каждую. Оплата становится доходом «VPN» проекта VPN (пополам с
- * партнёром) на кошелёк своей платёжки — Platega VPN (8 %) или CryptoBot VPN
- * (3 %), — с её комиссией. Какая платёжка, бот передаёт полем provider; не
+ * партнёром) на кошелёк своей платёжки — Platega VPN (8 %), CryptoBot VPN
+ * (3 %), Карта резерв VPN (10 %) или Lolzteam VPN (7 %), — с её комиссией. Какая платёжка, бот передаёт полем provider; не
  * передал (старые оплаты, бот ещё не доработан) — оплата ждёт в «Разобрать»,
  * пока владелец не выберет платёжку сам.
  */
@@ -14,7 +14,8 @@ import { addIncome, listCategories, listProjects, listWallets } from './ledger.j
 import { currentRate, type RateFetcher } from './rates.js';
 
 export const SOURCE = 'vpn';
-export const PROVIDERS = ['platega', 'cryptobot'] as const;
+/** Как их называет VPN-бот в поле provider; кошелёк — с ролью vpn:<имя>. */
+export const PROVIDERS = ['platega', 'cryptobot', 'card_ru', 'lolzteam'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 const isProvider = (v: unknown): v is Provider => (PROVIDERS as readonly unknown[]).includes(v);
 
@@ -58,7 +59,7 @@ const booked = (db: Db, ref: string) => !!db.prepare('SELECT 1 FROM operations W
  */
 async function book(db: Db, p: { ref: string; at: number; type: string; amount: number }, provider: Provider, fetchRate: RateFetcher, now: number): Promise<string | null> {
   const wallet = walletOf(db, provider);
-  if (!wallet) return `нет кошелька ${provider === 'platega' ? 'Platega VPN' : 'CryptoBot VPN'}`;
+  if (!wallet) return `нет кошелька с ролью vpn:${provider} (или он в архиве)`;
   const rate = await currentRate(db, wallet.currency, fetchRate, now);
   if (rate === null) return `нет курса ${wallet.currency}`;
   // Курс ждали из сети: пока ждали, эту же оплату мог записать соседний проход.
@@ -155,7 +156,7 @@ export async function resolveVpn(
   fetchRate: RateFetcher,
   now = Date.now()
 ): Promise<{ done: number; skipped: number }> {
-  if (action !== 'skip' && !isProvider(action)) throw new MoneyInputError('выберите платёжку: Platega или CryptoBot');
+  if (action !== 'skip' && !isProvider(action)) throw new MoneyInputError('выберите платёжку: Platega, CryptoBot, Карта резерв или Lolzteam');
   if (!Array.isArray(refs) || !refs.length) throw new MoneyInputError('не выбрано ни одной оплаты');
   if (refs.length > MAX_REFS) throw new MoneyInputError(`за раз — не больше ${MAX_REFS} оплат`);
   for (const r of refs) if (typeof r !== 'string' || !REF.test(r)) throw new MoneyInputError(`«${String(r).slice(0, 40)}» — не оплата`);

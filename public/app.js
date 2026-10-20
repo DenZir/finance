@@ -179,6 +179,16 @@ function syncPick() {
 }
 
 // --- VPN: оплаты без платёжки ----------------------------------------------------
+// как их называет VPN-бот → кнопка и кошелёк (роль vpn:<имя>)
+const VPN_PROVIDERS = [
+  ['platega', 'Platega', 'Platega VPN'],
+  ['cryptobot', 'CryptoBot', 'CryptoBot VPN'],
+  ['card_ru', 'Карта резерв', 'Карта резерв VPN'],
+  ['lolzteam', 'Lolzteam', 'Lolzteam VPN'],
+];
+const vpnButtons = (attr, ref) =>
+  VPN_PROVIDERS.map(([id, label]) => `<button class="btn" type="button" ${attr}="${id}"${ref ? ` data-ref="${ref}"` : ''}>${label}</button>`).join('');
+$('#vpnBulkProviders').innerHTML = vpnButtons('data-vbulk');
 const stamp = (ms) => `${day(ms)} ${new Date(ms + MSK).toISOString().slice(11, 16)}`;
 
 function renderVpn() {
@@ -195,7 +205,7 @@ function renderVpn() {
         return `<div class="deal"><span class="when"><label class="pick"><input type="checkbox" data-vpick="${ref}">${day(p.at)}</label></span>
           <div class="what"><b>${p.type === 'renewal' ? 'Продление' : 'Покупка'}</b><small>${stamp(p.at)} по Москве</small></div>
           <div class="sum"><span class="plus">+${rub(p.amount)}</span></div>
-          <div class="acts"><button class="btn" type="button" data-vone="platega" data-ref="${ref}">Platega</button><button class="btn" type="button" data-vone="cryptobot" data-ref="${ref}">CryptoBot</button><button class="btn ghost" type="button" data-vone="skip" data-ref="${ref}" title="Не учитывать: тестовая оплата и т. п.">×</button></div></div>`;
+          <div class="acts">${vpnButtons('data-vone', ref)}<button class="btn ghost" type="button" data-vone="skip" data-ref="${ref}" title="Не учитывать: тестовая оплата и т. п.">×</button></div></div>`;
       })
       .join('');
 }
@@ -218,7 +228,7 @@ async function resolveVpn(refs, action, buttons) {
   try {
     const r = await api('/api/vpn/resolve', { method: 'POST', body: JSON.stringify({ refs, action }) });
     await load();
-    toast(`${action === 'skip' ? 'Не учитываются' : `Записано на ${action === 'platega' ? 'Platega VPN' : 'CryptoBot VPN'}`}: ${r.done}${r.skipped ? `, пропущено: ${r.skipped}` : ''}`);
+    toast(`${action === 'skip' ? 'Не учитываются' : `Записано на ${VPN_PROVIDERS.find(([id]) => id === action)?.[2] ?? action}`}: ${r.done}${r.skipped ? `, пропущено: ${r.skipped}` : ''}`);
   } catch (err) {
     toast(err.message);
     await load().catch(() => {});

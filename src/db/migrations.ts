@@ -173,4 +173,11 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX vpn_payments_at ON vpn_payments(at);
   `,
+  `
+  -- Ещё два способа оплаты VPN-бота: «Карта резерв» (card_ru, 10 %) и Lolzteam
+  -- (7 %) — свои кабинеты, в рублях (владелец, 2026-10-20).
+  INSERT INTO wallets (name, currency, kind, fee_pct, created_at, role) VALUES
+    ('Карта резерв VPN', 'RUB', 'provider', 10, CAST(strftime('%s','now') AS INTEGER) * 1000, 'vpn:card_ru'),
+    ('Lolzteam VPN', 'RUB', 'provider', 7, CAST(strftime('%s','now') AS INTEGER) * 1000, 'vpn:lolzteam');
+  `,
 ];

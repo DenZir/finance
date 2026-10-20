@@ -54,7 +54,7 @@ test('оплаты VPN: платёжка из аналитики, разбор �
 
   // разбор руками
   assert.deepEqual(listUnsorted(db).map((p) => p.ref), ['4', '5']);
-  await assert.rejects(resolveVpn(db, ['4'], 'yookassa', deps.fetchRate, T), /Platega или CryptoBot/);
+  await assert.rejects(resolveVpn(db, ['4'], 'yookassa', deps.fetchRate, T), /Platega, CryptoBot, Карта резерв или Lolzteam/);
   await assert.rejects(resolveVpn(db, ['x'], 'platega', deps.fetchRate, T), /не оплата/);
   assert.deepEqual(await resolveVpn(db, ['4', '2', '99'], 'platega', deps.fetchRate, T), { done: 1, skipped: 2 }, 'записанная и неизвестная пропущены');
   assert.deepEqual(await resolveVpn(db, ['5'], 'skip', deps.fetchRate, T), { done: 1, skipped: 0 });
@@ -76,4 +76,23 @@ test('оплаты VPN: платёжка из аналитики, разбор �
   const r2 = await syncVpn(db2, { ...deps, fetchRate: async () => null }, T);
   assert.deepEqual(r2.waiting, ['нет курса USDT']);
   assert.equal((await syncVpn(db2, deps, T)).booked, 1, 'со следующей сверкой — записана');
+});
+
+test('карта резерв и Lolzteam: свои рублёвые кабинеты VPN со своей комиссией, в том числе при разборе руками', async () => {
+  const db = openDb(':memory:');
+  const deps = {
+    fetchPayments: async (after: number) => ({
+      more: false,
+      payments: [pay(1, 1000, 'card_ru'), pay(2, 1000, 'LOLZTEAM'), pay(3, 500, null)].filter((p) => p.id > after),
+    }),
+    fetchRate: async () => 100,
+    since: SINCE,
+  };
+  assert.deepEqual(await syncVpn(db, deps, T), { imported: 3, booked: 2, unsorted: 1, waiting: [] });
+  const w = (role: string) => listWallets(db).find((x) => x.role === role)!;
+  assert.equal(w('vpn:card_ru').currency, 'RUB');
+  assert.equal(balances(db).get(w('vpn:card_ru').id), rub(900), '1000 − 10 %');
+  assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(930), '1000 − 7 %, регистр платёжки не важен');
+  assert.deepEqual(await resolveVpn(db, ['3'], 'lolzteam', deps.fetchRate, T), { done: 1, skipped: 0 });
+  assert.equal(balances(db).get(w('vpn:lolzteam').id), rub(930 + 465));
 });

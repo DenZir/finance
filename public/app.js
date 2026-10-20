@@ -19,6 +19,8 @@ let adsAll = false;
 let payTarget = null;
 let welcomeRows = [];
 let incomeRows = [];
+let recurringRows = [];
+let recurringEdit = null; // регулярный в окне правки; null — новый
 let welcomeEdit = null; // размещение в окне правки; null — новое
 let fixDealId = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
@@ -516,6 +518,83 @@ function openPartner() {
   f.balance.focus();
 }
 
+// --- регулярные расходы ------------------------------------------------------------
+// месяц блока — выбранный; в режиме «Год» — текущий
+const recMonth = () => (period === 'year' ? todayIso().slice(0, 7) : month);
+const nameOrDash = (list, id) => (id == null ? '' : list.find((x) => x.id === id)?.name ?? '');
+
+function renderRecurring() {
+  const m = recMonth();
+  const [y, mo] = m.split('-').map(Number);
+  $('#recurringTitle').textContent = `Регулярные расходы · ${new Date(Date.UTC(y, mo - 1, 15)).toLocaleString('ru-RU', { month: 'long', timeZone: 'UTC' })}`;
+  const active = recurringRows.filter((r) => r.active);
+  const sum = (pick) => active.filter(pick).reduce((t, r) => t + (r.rubEstimate ?? 0), 0);
+  $('#recurringSum').innerHTML = active.length
+    ? [`в месяц ≈ ${rub(sum(() => true))}`, `записано ${rub(sum((r) => r.state === 'paid'))}`, sum((r) => r.state === 'due') ? `<span class="owed">ждёт ${rub(sum((r) => r.state === 'due'))}</span>` : '', sum((r) => r.state === 'upcoming') ? `впереди ${rub(sum((r) => r.state === 'upcoming'))}` : ''].filter(Boolean).join(' · ')
+    : '';
+  if (!recurringRows.length) {
+    $('#recurring').innerHTML = '<div class="empty">Регулярных расходов нет. Сервер, подписка — заведите: сумма, кошелёк, какого числа. В этот день бот пришлёт готовый черновик.</div>';
+    return;
+  }
+  $('#recurring').innerHTML = recurringRows
+    .map((r) => {
+      const id = r.id;
+      const sumTxt = `${amt(r.amount, r.currency)}${r.currency !== 'RUB' && r.rubEstimate != null ? `<small>≈ ${rub(r.rubEstimate)}</small>` : ''}`;
+      let acts;
+      if (!r.active) acts = '<span class="chip">выключен</span>';
+      else if (r.state === 'paid') acts = '<span class="chip">✓ записан</span>';
+      else if (r.state === 'skipped') acts = `<span class="chip">пропущен</span><button class="btn ghost" type="button" data-rskip="${id}" data-on="0">Вернуть</button>`;
+      else if (r.state === 'due') acts = `<button class="btn primary" type="button" data-rpay="${id}">Записать</button><button class="btn" type="button" data-rskip="${id}" data-on="1">Пропустить</button>`;
+      else acts = `<span class="chip">будет ${day(Date.parse(`${r.dueDate}T09:00:00Z`))}</span><button class="btn ghost" type="button" data-rpay="${id}" title="Записать заранее">Записать</button>`;
+      const sub = [nameOrDash(S.categories, r.categoryId), nameOrDash(S.projects, r.projectId), nameOrDash(S.wallets, r.walletId)].filter(Boolean).map(esc).join(' · ');
+      return `<div class="deal${!r.active || r.state === 'paid' || r.state === 'skipped' ? ' done' : ''}"><span class="when">${String(r.day).padStart(2, '0')} числа</span>
+        <div class="what"><b>${esc(r.name)}</b><small>${sub}${r.state === 'due' && r.active ? ` · <span class="age">ждёт с ${day(Date.parse(`${r.dueDate}T09:00:00Z`))}</span>` : ''}</small></div>
+        <div class="sum">${sumTxt}</div><div class="acts">${acts}<button class="btn ghost" type="button" data-redit="${id}" aria-label="Изменить">✎</button></div></div>`;
+    })
+    .join('');
+}
+
+function openRecurring(r) {
+  recurringEdit = r ?? null;
+  const f = $('#recurringForm');
+  f.reset();
+  $('#recurringError').hidden = true;
+  $('#recurringTitleDlg').textContent = r ? 'Регулярный расход' : 'Новый регулярный расход';
+  f.walletId.innerHTML = S.wallets.filter((w) => !w.archived).map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
+  f.categoryId.innerHTML = opts(S.categories.filter((c) => c.kind === 'expense'), '—');
+  f.projectId.innerHTML = opts(S.projects, '—');
+  const cb = S.wallets.find((w) => /cryptobot/i.test(w.name) && !w.role && !w.archived);
+  f.name.value = r?.name ?? '';
+  f.walletId.value = String(r?.walletId ?? cb?.id ?? f.walletId.value);
+  f.amount.value = r ? String(r.amount / MICRO).replace('.', ',') : '';
+  f.currency.value = r?.currency ?? '';
+  f.currency.placeholder = S.wallets.find((w) => String(w.id) === f.walletId.value)?.currency ?? '';
+  f.day.value = r?.day ?? '';
+  f.categoryId.value = r?.categoryId ?? '';
+  f.projectId.value = r?.projectId ?? '';
+  f.active.checked = r ? r.active : true;
+  f.querySelector('[data-active]').hidden = !r;
+  $('#recurringDel').hidden = !r;
+  $('#recurringDlg').showModal();
+}
+
+function payRecurringRow(id) {
+  const r = recurringRows.find((x) => x.id === id);
+  if (!r) return;
+  showPay({
+    title: 'Регулярный расход',
+    desc: `${r.name} · ${amt(r.amount, r.currency)} за ${$('#recurringTitle').textContent.split('· ')[1]}`,
+    amount: r.rubEstimate,
+    native: { amount: r.amount, currency: r.currency },
+    wallets: S.wallets.filter((w) => !w.archived),
+    walletId: r.walletId,
+    amountLabel: 'Сколько ушло',
+    hint: [nameOrDash(S.categories, r.categoryId), nameOrDash(S.projects, r.projectId)].filter(Boolean).join(' · ') || 'Расход',
+    url: `/api/recurring/${id}/pay`,
+    extra: { month: recMonth() },
+  });
+}
+
 // --- VPN: оплаты без платёжки ----------------------------------------------------
 // как их называет VPN-бот → кнопка и кошелёк (роль vpn:<имя>)
 const VPN_PROVIDERS = [
@@ -597,8 +676,9 @@ function showPay(target) {
   $('#payError').hidden = true;
   $('#payTitle').textContent = target.title;
   $('#payDeal').textContent = target.desc;
-  f.walletId.innerHTML = adWallets().map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
-  f.date.value = todayIso();
+  f.walletId.innerHTML = (target.wallets ?? adWallets()).map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
+  if (target.walletId) f.walletId.value = String(target.walletId);
+  f.date.value = target.date ?? todayIso();
   $('#payAmountLabel').firstChild.textContent = target.amountLabel;
   $('#payHint').textContent = target.hint;
   syncPay();
@@ -619,7 +699,13 @@ function syncPay() {
   const amount = payTarget?.amount;
   const w = S.wallets.find((x) => String(x.id) === f.walletId.value);
   f.querySelector('[data-pay-rate]').hidden = !w || w.currency === 'RUB';
-  if (amount == null || !w) return;
+  if (!w) return;
+  // сумма в валюте кошелька известна точно — без круга через рубли
+  if (payTarget?.native && payTarget.native.currency === w.currency) {
+    f.amount.value = String(payTarget.native.amount / MICRO).replace('.', ',');
+    return;
+  }
+  if (amount == null) return;
   const v = w.currency === 'RUB' ? amount / MICRO : w.rate ? Math.round((amount / MICRO / w.rate) * 100) / 100 : '';
   f.amount.value = v === '' ? '' : String(v).replace('.', ',');
 }
@@ -708,10 +794,11 @@ async function load() {
   ]);
   S = state;
   deals = ads;
-  [vpnRows, welcomeRows, incomeRows] = await Promise.all([
+  [vpnRows, welcomeRows, incomeRows, recurringRows] = await Promise.all([
     api('/api/vpn/unsorted'),
     api('/api/welcome'),
     api(byYear ? `/api/income?year=${year}` : `/api/income?month=${month}`),
+    api(`/api/recurring?month=${recMonth()}`),
   ]);
   $('#login').hidden = true;
   $('#app').hidden = false;
@@ -729,6 +816,7 @@ async function load() {
   renderAds();
   renderIncome();
   renderWelcome();
+  renderRecurring();
   renderVpn();
   renderWallets();
   $('#report').innerHTML = byYear ? yearHtml(report) : reportHtml(report);
@@ -967,6 +1055,54 @@ $('#partnerForm').addEventListener('submit', async (e) => {
   }
 });
 
+$('#addRecurring').addEventListener('click', () => openRecurring(null));
+$('#recurring').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.redit) return openRecurring(recurringRows.find((x) => x.id === Number(b.dataset.redit)));
+  if (b.dataset.rpay) return payRecurringRow(Number(b.dataset.rpay));
+  if (b.dataset.rskip) {
+    try {
+      const on = b.dataset.on === '1';
+      await api(`/api/recurring/${b.dataset.rskip}/skip`, { method: 'POST', body: JSON.stringify({ month: recMonth(), on }) });
+      await load();
+      toast(on ? 'Пропущено в этом месяце' : 'Снова ждёт');
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+});
+$('#recurringForm').addEventListener('change', (e) => {
+  if (e.target.name === 'walletId') e.target.form.currency.placeholder = S.wallets.find((w) => String(w.id) === e.target.value)?.currency ?? '';
+});
+$('#recurringForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const body = { name: f.name, walletId: f.walletId, amount: f.amount, currency: f.currency, day: f.day, categoryId: f.categoryId || null, projectId: f.projectId || null };
+  if (recurringEdit) body.active = e.target.active.checked;
+  try {
+    if (recurringEdit) await api(`/api/recurring/${recurringEdit.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    else await api('/api/recurring', { method: 'POST', body: JSON.stringify(body) });
+    $('#recurringDlg').close();
+    await load();
+    toast(recurringEdit ? 'Сохранено' : 'Регулярный расход добавлен — в его день бот пришлёт черновик');
+  } catch (err) {
+    $('#recurringError').textContent = err.message;
+    $('#recurringError').hidden = false;
+  }
+});
+$('#recurringDel').addEventListener('click', async () => {
+  if (!recurringEdit || !confirm(`Удалить «${recurringEdit.name}»? Уже записанные расходы останутся.`)) return;
+  try {
+    await api(`/api/recurring/${recurringEdit.id}`, { method: 'DELETE' });
+    $('#recurringDlg').close();
+    await load();
+  } catch (err) {
+    $('#recurringError').textContent = err.message;
+    $('#recurringError').hidden = false;
+  }
+});
+
 $('#addWelcome').addEventListener('click', () => openWelcome(null));
 $('#welcome').addEventListener('click', async (e) => {
   const b = e.target.closest('button');
@@ -1062,7 +1198,7 @@ $('#payForm').addEventListener('submit', async (e) => {
   const [y, m, d] = String(f.date || todayIso()).split('-').map(Number);
   const at = Date.UTC(y, m - 1, d, 12) - MSK;
   try {
-    await api(payTarget.url, { method: 'POST', body: JSON.stringify({ ...f, at }) });
+    await api(payTarget.url, { method: 'POST', body: JSON.stringify({ ...f, at, ...(payTarget.extra ?? {}) }) });
     $('#payDlg').close();
     await load();
     toast('Записано');

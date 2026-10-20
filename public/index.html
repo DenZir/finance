@@ -67,6 +67,12 @@
       <div id="welcome"></div>
     </section>
 
+    <section class="card" id="recurringCard">
+      <div class="card-h"><h2 id="recurringTitle">Регулярные расходы</h2><button class="btn" id="addRecurring" type="button">+ Расход</button></div>
+      <div class="wd-sum rec-sum" id="recurringSum"></div>
+      <div id="recurring"></div>
+    </section>
+
     <section class="card" id="vpnCard" hidden>
       <div class="card-h"><h2>VPN — разобрать</h2></div>
       <p class="hint vpn-hint">VPN-бот не сказал, через какую платёжку пришли эти оплаты. Выберите — оплата ляжет доходом VPN на кошелёк этого кабинета с его комиссией.</p>
@@ -185,6 +191,25 @@
     <div id="catalog"></div>
     <p id="catalogError" class="err" hidden></p>
   </div>
+</dialog>
+
+<dialog id="recurringDlg" class="dlg">
+  <form id="recurringForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3 id="recurringTitleDlg">Регулярный расход</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="fields">
+      <label class="wide">Что<input name="name" required maxlength="100" placeholder="Сервер Aeza, ChatGPT…"></label>
+      <label>Сумма<input name="amount" inputmode="decimal" required placeholder="20"></label>
+      <label>Валюта суммы<input name="currency" maxlength="6" autocapitalize="characters" placeholder="как у кошелька"></label>
+      <label>С какого кошелька<select name="walletId"></select></label>
+      <label>Какого числа<input name="day" inputmode="numeric" required placeholder="5"></label>
+      <label>Вид расхода<select name="categoryId"></select></label>
+      <label>Проект<select name="projectId"></select></label>
+      <label class="wide check" data-active><input type="checkbox" name="active"> Включён — бот присылает черновик</label>
+    </div>
+    <p class="hint">В этот день, с 10:00 по Москве, бот пришлёт готовый черновик: «Записать», «Пропустить в этом месяце» или ответьте ему другой суммой. 31-е в коротком месяце — его последний день.</p>
+    <p id="recurringError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn danger" type="button" id="recurringDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+  </form>
 </dialog>
 
 <dialog id="walletDlg" class="dlg">

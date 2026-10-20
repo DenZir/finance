@@ -13,6 +13,8 @@ VPN. Отдельный сервис, а не раздел tg-analytics: ден�
 Node 22+/TypeScript (strict ESM, через tsx без сборки), Express 5,
 better-sqlite3 без ORM, страница — чистый HTML/JS в `public/`.
 
+Открытые задачи — в `.claude/BACKLOG.md`: сделанное отмечать, новое дописывать.
+
 ## Команды
 
 ```bash

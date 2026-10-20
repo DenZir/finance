@@ -12,7 +12,7 @@
  */
 import type { Db } from './db/index.js';
 import { MICRO, MoneyInputError } from './money.js';
-import { addExpense, addIncome, getWallet, listCategories, listProjects } from './ledger.js';
+import { addExpense, addIncome, categoryIdByCode, getWallet, projectIdByCode } from './ledger.js';
 
 export const SOURCE = 'ads';
 
@@ -162,15 +162,13 @@ export function payDeal(
   const d = getDeal(db, ref);
   if (d.state === 'paid') throw new MoneyInputError('эта сделка уже оплачена');
   getWallet(db, input.walletId);
-  const project = listProjects(db).find((p) => p.name === 'Реклама')?.id ?? null;
-  const cat = (kind: 'income' | 'expense', name: string) =>
-    listCategories(db).find((c) => c.kind === kind && c.name === name)?.id ?? null;
+  const project = projectIdByCode(db, 'ads');
   const base = { at: input.at, walletId: input.walletId, amount: input.amount, rate: input.rate, projectId: project, note: dealNote(d), source: SOURCE, sourceRef: ref };
   return db.transaction(() => {
     db.prepare('UPDATE ad_deals SET barter_at = NULL WHERE ref = ?').run(ref);
     return d.kind === 'sale'
-      ? addIncome(db, { ...base, feePct: 0, categoryId: cat('income', d.slot === 'stories' ? 'Реклама — сторисы' : 'Реклама — посты') }, now)
-      : addExpense(db, { ...base, categoryId: cat('expense', 'Закуп рекламы') }, now);
+      ? addIncome(db, { ...base, feePct: 0, categoryId: categoryIdByCode(db, d.slot === 'stories' ? 'ads_stories' : 'ads_posts') }, now)
+      : addExpense(db, { ...base, categoryId: categoryIdByCode(db, 'ads_buy') }, now);
   })();
 }
 

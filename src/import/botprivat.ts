@@ -7,7 +7,7 @@
  */
 import type { Db } from '../db/index.js';
 import { MICRO } from '../money.js';
-import { addIncome, listCategories, listProjects, listWallets } from '../ledger.js';
+import { addIncome, categoryIdByCode, listWallets, projectIdByCode } from '../ledger.js';
 import { currentRate, type RateFetcher } from '../rates.js';
 
 export interface PaidOrder {
@@ -59,8 +59,8 @@ export async function importBotprivat(
   let since = Math.max(deps.since, (cursor ?? 0) - OVERLAP_MS);
   let seen = cursor ?? deps.since;
   let firstWaiting: number | null = null;
-  const category = listCategories(db).find((c) => c.kind === 'income' && c.name === 'Приватка')?.id ?? null;
-  const project = listProjects(db).find((p) => p.name === 'Приватка MARIN')?.id ?? null;
+  const category = categoryIdByCode(db, 'privat');
+  const project = projectIdByCode(db, 'privat');
   let imported = 0;
   const waiting = new Set<string>();
 

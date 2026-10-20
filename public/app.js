@@ -460,6 +460,48 @@ function openFixPay(fixId) {
   });
 }
 
+// --- виды и проекты -----------------------------------------------------------------
+let catalogData = null;
+
+async function openCatalog() {
+  $('#catalogError').hidden = true;
+  catalogData = await api('/api/catalog');
+  renderCatalog();
+  if (!$('#catalogDlg').open) $('#catalogDlg').showModal();
+}
+
+function renderCatalog() {
+  const { categories, projects } = catalogData;
+  const used = (n) => `<span class="used" title="Операций с ним">${n ? `${n} оп.` : ''}</span>`;
+  const lockOrArch = (x, type) => (x.code ? '<span class="lock" title="Нужен импорту или боту — только переименовать">🔒</span>' : `<button class="icon" type="button" data-arch="${type}:${x.id}" aria-label="В архив" title="В архив">×</button>`);
+  const rowCat = (c) => `<div class="cat-row"><input value="${esc(c.name)}" maxlength="60" data-rename="categories:${c.id}" aria-label="Название">${used(c.used)}${lockOrArch(c, 'categories')}</div>`;
+  const rowPrj = (p) => `<div class="cat-row prj"><input value="${esc(p.name)}" maxlength="60" data-rename="projects:${p.id}" aria-label="Название"><input value="${p.partnerPct || ''}" inputmode="decimal" placeholder="0 %" data-pct="${p.id}" aria-label="Доля партнёра, %" title="Доля партнёра, % — от дохода за вычетом комиссий и от расходов">${used(p.used)}${lockOrArch(p, 'projects')}</div>`;
+  const archived = (list, type) => (list.length ? `<details><summary>В архиве · ${list.length}</summary>${list.map((x) => `<div class="cat-row arch"><span>${esc(x.name)}</span>${used(x.used)}<button class="btn ghost" type="button" data-unarch="${type}:${x.id}">Вернуть</button></div>`).join('')}</details>` : '');
+  const sec = (title, kind) => {
+    const list = categories.filter((c) => c.kind === kind);
+    return `<div class="cat-sec"><h4>${title}</h4>${list.filter((c) => !c.archived).map(rowCat).join('')}
+      <form class="cat-add" data-add="${kind}"><input name="name" maxlength="60" placeholder="Новый вид"><button class="btn" type="submit">Добавить</button></form>${archived(list.filter((c) => c.archived), 'categories')}</div>`;
+  };
+  $('#catalog').innerHTML = sec('Виды дохода', 'income') + sec('Виды расхода', 'expense') +
+    `<div class="cat-sec"><h4>Проекты · доля партнёра, %</h4>${projects.filter((p) => !p.archived).map(rowPrj).join('')}
+      <form class="cat-add prj" data-add="project"><input name="name" maxlength="60" placeholder="Новый проект"><input name="partnerPct" inputmode="decimal" placeholder="0 %"><button class="btn" type="submit">Добавить</button></form>${archived(projects.filter((p) => p.archived), 'projects')}</div>`;
+}
+
+async function catalogCall(path, init) {
+  try {
+    $('#catalogError').hidden = true;
+    await api(path, init);
+    await load();
+    catalogData = await api('/api/catalog');
+    renderCatalog();
+    return true;
+  } catch (err) {
+    $('#catalogError').textContent = err.message;
+    $('#catalogError').hidden = false;
+    return false;
+  }
+}
+
 // --- партнёрка: доход по балансу в миниапке ----------------------------------------
 function openPartner() {
   const w = S.wallets.find((x) => x.role === 'partner');
@@ -876,6 +918,33 @@ $('#incDays').addEventListener('click', (e) => {
   if (inc.open.has(d.dataset.day)) inc.open.delete(d.dataset.day);
   else inc.open.add(d.dataset.day);
   renderIncome();
+});
+
+$('#openCatalog').addEventListener('click', () => openCatalog().catch((e) => toast(e.message)));
+$('#catalog').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.dataset.rename) {
+    const [type, id] = t.dataset.rename.split(':');
+    catalogCall(`/api/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ name: t.value }) });
+  } else if (t.dataset.pct) {
+    catalogCall(`/api/projects/${t.dataset.pct}`, { method: 'PATCH', body: JSON.stringify({ partnerPct: t.value }) });
+  }
+});
+$('#catalog').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-arch],[data-unarch]');
+  if (!b) return;
+  const [type, id] = (b.dataset.arch || b.dataset.unarch).split(':');
+  const on = !!b.dataset.arch;
+  if (on && !confirm('Убрать в архив? Он пропадёт из выбора, операции с ним останутся.')) return;
+  catalogCall(`/api/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ archived: on }) });
+});
+$('#catalog').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target.closest('[data-add]');
+  const data = Object.fromEntries(new FormData(f));
+  const project = f.dataset.add === 'project';
+  const ok = await catalogCall(project ? '/api/projects' : '/api/categories', { method: 'POST', body: JSON.stringify(project ? data : { kind: f.dataset.add, name: data.name }) });
+  if (ok) toast(project ? 'Проект добавлен' : 'Вид добавлен');
 });
 
 $('#wallets').addEventListener('click', (e) => {

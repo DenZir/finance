@@ -27,7 +27,7 @@
       <span id="monthLabel"></span>
       <button class="icon" id="nextMonth" type="button" aria-label="Следующий месяц">›</button>
     </div>
-    <button class="btn ghost" id="logout" type="button">Выйти</button>
+    <div class="top-r"><button class="icon" id="openCatalog" type="button" aria-label="Виды и проекты" title="Виды и проекты">⚙</button><button class="btn ghost" id="logout" type="button">Выйти</button></div>
   </header>
 
   <main class="wrap">
@@ -176,6 +176,15 @@
     <p id="partnerError" class="err" hidden></p>
     <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сверить</button></div>
   </form>
+</dialog>
+
+<dialog id="catalogDlg" class="dlg dlg-wide">
+  <div class="cat-wrap">
+    <div class="dlg-h"><h3>Виды и проекты</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p class="hint cat-hint">Название меняется сразу, у всех операций. Заведённые при установке (с замком) нужны импортам и боту — их можно переименовать, но не убрать.</p>
+    <div id="catalog"></div>
+    <p id="catalogError" class="err" hidden></p>
+  </div>
 </dialog>
 
 <dialog id="walletDlg" class="dlg">

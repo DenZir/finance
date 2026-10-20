@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { MoneyInputError, toRub } from '../money.js';
-import { addExpense, addIncome, deleteOperation, listCategories, listProjects, listWallets, type Wallet } from '../ledger.js';
+import { addExpense, addIncome, categoryIdByCode, deleteOperation, listCategories, listProjects, listWallets, projectIdByCode, type Wallet } from '../ledger.js';
 import { partnerWallet } from '../partner.js';
 import { currentRate, type RateFetcher } from '../rates.js';
 import { guessCategory, parseQuick, projectOf, type QuickKind } from './parse.js';
@@ -142,7 +142,7 @@ export class QuickEntry {
     if (!wallet) return { text: 'Кошельков нет — заведите их на странице «Деньги».' };
     const guessed = this.guess(parsed.kind, parsed.note);
     // доход партнёрки ложится на её счёт — иначе следующая сверка по балансу посчитает его второй раз
-    if (parsed.kind === 'income' && listCategories(db).find((c) => c.id === guessed.categoryId)?.name === 'Партнёрская программа') {
+    if (parsed.kind === 'income' && guessed.categoryId !== null && guessed.categoryId === categoryIdByCode(db, 'partner')) {
       wallet = partnerWallet(db) ?? wallet;
     }
     const t = now();
@@ -191,8 +191,8 @@ export class QuickEntry {
         const cat = listCategories(db).find((c) => c.id === arg && c.kind === d.kind);
         if (!cat) return { answer: 'Такого вида нет' };
         d.categoryId = cat.id;
-        const project = projectOf(d.kind, cat.name);
-        if (project) d.projectId = listProjects(db).find((p) => p.name === project)?.id ?? d.projectId;
+        const project = projectOf(d.kind, cat.code);
+        if (project) d.projectId = projectIdByCode(db, project) ?? d.projectId;
         return this.render(d, 'main');
       }
       case 'p':
@@ -224,8 +224,8 @@ export class QuickEntry {
     const g = guessCategory(kind, note);
     const { db } = this.deps;
     return {
-      categoryId: listCategories(db).find((c) => c.kind === kind && c.name === g.category)?.id ?? null,
-      projectId: g.project === null ? null : (listProjects(db).find((p) => p.name === g.project)?.id ?? null),
+      categoryId: categoryIdByCode(db, g.category),
+      projectId: g.project === null ? null : projectIdByCode(db, g.project),
     };
   }
 

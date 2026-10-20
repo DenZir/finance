@@ -118,6 +118,26 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .wdeal summary { cursor: pointer; }
 .wdeal details .deal { opacity: .8; }
 .dlg-f .sp { flex: 1; }
+.top-r { display: flex; align-items: center; gap: 8px; }
+
+/* виды и проекты */
+.dlg.dlg-wide { width: min(560px, calc(100vw - 32px)); }
+.cat-wrap { padding: 16px; }
+.cat-hint { margin: -6px 0 10px; }
+.cat-sec h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
+.cat-row { display: grid; grid-template-columns: 1fr 52px 32px; gap: 8px; align-items: center; padding: 4px 0; }
+.cat-row.prj { grid-template-columns: 1fr 76px 52px 32px; }
+.cat-row.arch { grid-template-columns: 1fr 52px auto; }
+.cat-row input { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; color: var(--text); min-width: 0; }
+.cat-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cat-row .used { color: var(--dim); font-size: 11.5px; font-family: var(--mono); white-space: nowrap; text-align: right; }
+.cat-row .lock { color: var(--dim); width: 32px; text-align: center; }
+.cat-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 4px; }
+.dlg form.cat-add { padding: 0; }
+.cat-add.prj { grid-template-columns: 1fr 76px auto; }
+.cat-add input { width: 100%; background: none; border: 1px dashed var(--line); border-radius: 8px; padding: 7px 9px; color: var(--text); min-width: 0; }
+.cat-sec details { margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+.cat-sec summary { cursor: pointer; }
 
 /* доход: итог, доли, график, лента дней */
 .inc-h { flex-wrap: wrap; }
@@ -187,4 +207,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
   .iday .when { font-size: 11.5px; }
   .iday-d { padding-left: 72px; }
   .inc-ctl .seg.mini button { padding: 4px 9px; font-size: 12px; }
+  .cat-row.prj { grid-template-columns: 1fr 64px 32px; }
+  .cat-add.prj { grid-template-columns: 1fr 64px auto; }
+  .cat-row.prj .used { display: none; }
 }

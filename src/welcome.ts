@@ -12,7 +12,7 @@
  */
 import type { Db } from './db/index.js';
 import { MICRO, MoneyInputError } from './money.js';
-import { addIncome, getWallet, listCategories, listProjects } from './ledger.js';
+import { addIncome, categoryIdByCode, getWallet, projectIdByCode } from './ledger.js';
 
 export const SOURCE = 'welcome';
 const fixRef = (id: number) => `fix:${id}`;
@@ -170,8 +170,8 @@ export function payFix(
     amount: input.amount,
     rate: input.rate,
     feePct: 0,
-    categoryId: listCategories(db).find((c) => c.kind === 'income' && c.name === 'Заявки с приветки')?.id ?? null,
-    projectId: listProjects(db).find((p) => p.name === 'Реклама')?.id ?? null,
+    categoryId: categoryIdByCode(db, 'welcome'),
+    projectId: projectIdByCode(db, 'ads'),
     note: `Приветка · ${deal.contact} · ${fix.count} заявок`,
     source: SOURCE,
     sourceRef: fixRef(fixId),

@@ -10,7 +10,7 @@
  */
 import type { Db } from './db/index.js';
 import { MICRO, MoneyInputError } from './money.js';
-import { addIncome, listCategories, listProjects, listWallets } from './ledger.js';
+import { addIncome, categoryIdByCode, listWallets, projectIdByCode } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
 
 export const SOURCE = 'vpn';
@@ -70,8 +70,8 @@ async function book(db: Db, p: { ref: string; at: number; type: string; amount: 
     amount: wallet.currency === 'RUB' ? p.amount : Math.round(p.amount / rate),
     rate,
     grossRub: p.amount,
-    categoryId: listCategories(db).find((c) => c.kind === 'income' && c.name === 'VPN')?.id ?? null,
-    projectId: listProjects(db).find((p) => p.name === 'VPN')?.id ?? null,
+    categoryId: categoryIdByCode(db, 'vpn'),
+    projectId: projectIdByCode(db, 'vpn'),
     note: p.type === 'renewal' ? 'продление' : 'покупка',
     source: SOURCE,
     sourceRef: p.ref,

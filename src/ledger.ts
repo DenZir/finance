@@ -6,7 +6,7 @@
  * которые исчезли из учёта.
  */
 import type { Db } from './db/index.js';
-import { MoneyInputError, pctOf, toRub } from './money.js';
+import { MoneyInputError, parsePct, pctOf, toRub } from './money.js';
 
 export type WalletKind = 'provider' | 'crypto' | 'card' | 'cash';
 export const WALLET_KINDS: readonly WalletKind[] = ['provider', 'crypto', 'card', 'cash'];
@@ -27,12 +27,15 @@ export interface Project {
   id: number;
   name: string;
   partnerPct: number;
+  /** у заведённых при установке — постоянный код (projects.code); свои — null */
+  code: string | null;
 }
 
 export interface Category {
   id: number;
   kind: 'income' | 'expense';
   name: string;
+  code: string | null;
 }
 
 export function listWallets(db: Db): Wallet[] {
@@ -48,11 +51,24 @@ export function getWallet(db: Db, id: number): Wallet {
 }
 
 export function listProjects(db: Db): Project[] {
-  return (db.prepare('SELECT * FROM projects WHERE archived = 0 ORDER BY id').all() as any[]).map((p) => ({ id: p.id, name: p.name, partnerPct: p.partner_pct }));
+  return (db.prepare('SELECT * FROM projects WHERE archived = 0 ORDER BY id').all() as any[]).map((p) => ({ id: p.id, name: p.name, partnerPct: p.partner_pct, code: p.code ?? null }));
 }
 
 export function listCategories(db: Db): Category[] {
-  return (db.prepare('SELECT * FROM categories WHERE archived = 0 ORDER BY kind, id').all() as any[]).map((c) => ({ id: c.id, kind: c.kind, name: c.name }));
+  return (db.prepare('SELECT * FROM categories WHERE archived = 0 ORDER BY kind, id').all() as any[]).map((c) => ({ id: c.id, kind: c.kind, name: c.name, code: c.code ?? null }));
+}
+
+/**
+ * Вид и проект, которые нужны импортам и боту, — по коду, а не по названию:
+ * владелец может их переименовать. Убранный в архив тоже находится — архив
+ * прячет его из выбора, но не отрывает от него новые операции импорта.
+ */
+export function categoryIdByCode(db: Db, code: string): number | null {
+  return (db.prepare('SELECT id FROM categories WHERE code = ?').get(code) as { id: number } | undefined)?.id ?? null;
+}
+
+export function projectIdByCode(db: Db, code: string): number | null {
+  return (db.prepare('SELECT id FROM projects WHERE code = ?').get(code) as { id: number } | undefined)?.id ?? null;
 }
 
 const CURRENCY = /^[A-Z]{2,6}$/;
@@ -411,4 +427,97 @@ export function incomeSeries(db: Db, from: number, to: number, by: 'day' | 'mont
        GROUP BY key, category_id, project_id ORDER BY key`
     )
     .all(from, to) as IncomeBucket[];
+}
+
+// --- виды и проекты: владелец заводит свои, переименовывает и убирает в архив ---
+
+export interface CatalogItem {
+  id: number;
+  name: string;
+  code: string | null;
+  archived: boolean;
+  /** сколько операций с ним — показать, прежде чем убрать в архив */
+  used: number;
+}
+
+export function listCatalog(db: Db): {
+  categories: (CatalogItem & { kind: 'income' | 'expense' })[];
+  projects: (CatalogItem & { partnerPct: number })[];
+} {
+  const cats = db
+    .prepare('SELECT c.*, (SELECT COUNT(*) FROM operations o WHERE o.category_id = c.id) AS used FROM categories c ORDER BY c.kind, c.archived, c.id')
+    .all() as any[];
+  const prjs = db
+    .prepare('SELECT p.*, (SELECT COUNT(*) FROM operations o WHERE o.project_id = p.id) AS used FROM projects p ORDER BY p.archived, p.id')
+    .all() as any[];
+  return {
+    categories: cats.map((c) => ({ id: c.id, kind: c.kind, name: c.name, code: c.code ?? null, archived: c.archived === 1, used: c.used })),
+    projects: prjs.map((p) => ({ id: p.id, name: p.name, partnerPct: p.partner_pct, code: p.code ?? null, archived: p.archived === 1, used: p.used })),
+  };
+}
+
+function catalogName(v: unknown): string {
+  const name = String(v ?? '').trim().replace(/\s+/g, ' ');
+  if (!name) throw new MoneyInputError('нужно название');
+  if (name.length > 60) throw new MoneyInputError('название — до 60 знаков');
+  return name;
+}
+
+function assertFreeName(db: Db, table: 'categories' | 'projects', name: string, id: number | null, kind?: string): void {
+  const rows = db.prepare(`SELECT id, name${table === 'categories' ? ', kind' : ''} FROM ${table} WHERE archived = 0`).all() as any[];
+  const taken = rows.find((r) => r.id !== id && (kind === undefined || r.kind === kind) && r.name.toLowerCase() === name.toLowerCase());
+  if (taken) throw new MoneyInputError(`«${taken.name}» уже есть`);
+}
+
+export function createCategory(db: Db, input: { kind: unknown; name: unknown }): number {
+  if (input.kind !== 'income' && input.kind !== 'expense') throw new MoneyInputError('вид — дохода или расхода');
+  const name = catalogName(input.name);
+  assertFreeName(db, 'categories', name, null, input.kind);
+  return Number(db.prepare('INSERT INTO categories (kind, name) VALUES (?, ?)').run(input.kind, name).lastInsertRowid);
+}
+
+/** Переименовать можно любой; в архив — только свой: заведённые нужны импортам и боту. */
+export function updateCategory(db: Db, id: number, patch: { name?: unknown; archived?: unknown }): void {
+  const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(id) as any;
+  if (!row) throw new MoneyInputError('такого вида нет');
+  if (patch.name !== undefined) {
+    const name = catalogName(patch.name);
+    assertFreeName(db, 'categories', name, id, row.kind);
+    db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(name, id);
+  }
+  if (patch.archived !== undefined) {
+    if (patch.archived && row.code) throw new MoneyInputError(`«${row.name}» нужен импорту или боту — его можно только переименовать`);
+    if (!patch.archived) assertFreeName(db, 'categories', row.name, id, row.kind);
+    db.prepare('UPDATE categories SET archived = ? WHERE id = ?').run(patch.archived ? 1 : 0, id);
+  }
+}
+
+export function createProject(db: Db, input: { name: unknown; partnerPct?: unknown }): number {
+  const name = catalogName(input.name);
+  assertFreeName(db, 'projects', name, null);
+  const pct = input.partnerPct === undefined || input.partnerPct === '' ? 0 : parsePct(input.partnerPct);
+  return Number(db.prepare('INSERT INTO projects (name, partner_pct) VALUES (?, ?)').run(name, pct).lastInsertRowid);
+}
+
+/**
+ * Доля партнёра меняется для всего проекта сразу — долг перед ним считается
+ * по всем операциям проекта с текущей долей (partnerDebts).
+ */
+export function updateProject(db: Db, id: number, patch: { name?: unknown; partnerPct?: unknown; archived?: unknown }): void {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+  if (!row) throw new MoneyInputError('такого проекта нет');
+  if (patch.name !== undefined) {
+    const name = catalogName(patch.name);
+    assertFreeName(db, 'projects', name, id);
+    db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, id);
+  }
+  if (patch.partnerPct !== undefined) {
+    const pct = patch.partnerPct === '' ? 0 : parsePct(patch.partnerPct);
+    db.prepare('UPDATE projects SET partner_pct = ? WHERE id = ?').run(pct, id);
+  }
+  if (patch.archived !== undefined) {
+    if (patch.archived && row.code) throw new MoneyInputError(`«${row.name}» нужен импорту или боту — его можно только переименовать`);
+    if (!patch.archived) assertFreeName(db, 'projects', row.name, id);
+    db.prepare('UPDATE projects SET archived = ? WHERE id = ?').run(patch.archived ? 1 : 0, id);
+  }
 }

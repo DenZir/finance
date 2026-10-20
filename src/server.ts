@@ -12,7 +12,7 @@ import { SESSION_COOKIE, SESSION_MS, checkTelegramLogin, createSession, dropSess
 import { MoneyInputError, parseAmount, parsePct, parseRate } from './money.js';
 import {
   WALLET_KINDS, addAdjustment, addExpense, addIncome, addPayout, addTransfer, balances, createWallet, deleteOperation, getWallet,
-  incomeSeries, listCategories, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet, yearReport,
+  createCategory, createProject, incomeSeries, listCatalog, listCategories, updateCategory, updateProject, listOperations, listProjects, listWallets, monthRange, monthReport, partnerDebts, updateWallet, yearReport,
   type Wallet,
   type WalletKind,
 } from './ledger.js';
@@ -292,6 +292,25 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
 
   app.post('/api/ad-deals/:ref/waiting', (req, res) => {
     setWaiting(db, String(req.params.ref), req.body?.on !== false, now());
+    res.json({ ok: true });
+  });
+
+  // --- виды и проекты ---------------------------------------------------------------
+  app.get('/api/catalog', (_req, res) => {
+    res.json(listCatalog(db));
+  });
+  app.post('/api/categories', (req, res) => {
+    res.json({ id: createCategory(db, req.body ?? {}) });
+  });
+  app.patch('/api/categories/:id', (req, res) => {
+    updateCategory(db, reqId(req.params.id, 'вид'), req.body ?? {});
+    res.json({ ok: true });
+  });
+  app.post('/api/projects', (req, res) => {
+    res.json({ id: createProject(db, req.body ?? {}) });
+  });
+  app.patch('/api/projects/:id', (req, res) => {
+    updateProject(db, reqId(req.params.id, 'проект'), req.body ?? {});
     res.json({ ok: true });
   });
 

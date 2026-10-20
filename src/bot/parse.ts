@@ -97,30 +97,31 @@ interface Rule {
   project: string | null;
 }
 
-// Виды и проекты — как заведены в первой миграции. Порядок важен: «vpn сервис»
+// Виды и проекты — по кодам из миграций (categories.code, projects.code):
+// владелец может их переименовать, коды остаются. Порядок важен: «vpn сервис»
 // — серверы VPN, а не подписка.
 const RULES: readonly Rule[] = [
-  { kind: 'expense', words: ['сервер', 'хостинг', 'vps', 'впн', 'vpn', 'домен', 'прокси'], category: 'VPN — серверы и сервисы', project: 'VPN' },
-  { kind: 'expense', words: ['подписк', 'сервис', 'claude', 'chatgpt'], category: 'Сервисы и подписки', project: null },
-  { kind: 'expense', words: ['закуп', 'реклам'], category: 'Закуп рекламы', project: 'Реклама' },
-  { kind: 'income', words: ['сторис', 'stories'], category: 'Реклама — сторисы', project: 'Реклама' },
-  { kind: 'income', words: ['пост', 'реклам'], category: 'Реклама — посты', project: 'Реклама' },
-  { kind: 'income', words: ['привет', 'заявк'], category: 'Заявки с приветки', project: null },
-  { kind: 'income', words: ['партнер', 'рефер'], category: 'Партнёрская программа', project: null },
-  { kind: 'income', words: ['приват'], category: 'Приватка', project: 'Приватка MARIN' },
-  { kind: 'income', words: ['впн', 'vpn'], category: 'VPN', project: 'VPN' },
+  { kind: 'expense', words: ['сервер', 'хостинг', 'vps', 'впн', 'vpn', 'домен', 'прокси'], category: 'vpn_infra', project: 'vpn' },
+  { kind: 'expense', words: ['подписк', 'сервис', 'claude', 'chatgpt'], category: 'services', project: null },
+  { kind: 'expense', words: ['закуп', 'реклам'], category: 'ads_buy', project: 'ads' },
+  { kind: 'income', words: ['сторис', 'stories'], category: 'ads_stories', project: 'ads' },
+  { kind: 'income', words: ['пост', 'реклам'], category: 'ads_posts', project: 'ads' },
+  { kind: 'income', words: ['привет', 'заявк'], category: 'welcome', project: null },
+  { kind: 'income', words: ['партнер', 'рефер'], category: 'partner', project: null },
+  { kind: 'income', words: ['приват'], category: 'privat', project: 'privat' },
+  { kind: 'income', words: ['впн', 'vpn'], category: 'vpn', project: 'vpn' },
 ];
 
 const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
 
-/** Вид и проект по словам заметки; ничего не подошло — «Прочее» без проекта. */
+/** Код вида и проекта по словам заметки; ничего не подошло — «Прочее» без проекта. */
 export function guessCategory(kind: QuickKind, note: string): { category: string; project: string | null } {
   const t = norm(note);
   const rule = RULES.find((r) => r.kind === kind && r.words.some((w) => t.includes(w)));
-  return rule ? { category: rule.category, project: rule.project } : { category: 'Прочее', project: null };
+  return rule ? { category: rule.category, project: rule.project } : { category: kind === 'income' ? 'other_income' : 'other_expense', project: null };
 }
 
-/** Проект, который у вида сам собой разумеется: «Закуп рекламы» — «Реклама». */
-export function projectOf(kind: QuickKind, category: string): string | null {
-  return RULES.find((r) => r.kind === kind && r.category === category)?.project ?? null;
+/** Код проекта, который у вида сам собой разумеется: «Закуп рекламы» — «Реклама». */
+export function projectOf(kind: QuickKind, categoryCode: string | null): string | null {
+  return RULES.find((r) => r.kind === kind && r.category === categoryCode)?.project ?? null;
 }

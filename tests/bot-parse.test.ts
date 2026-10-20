@@ -60,29 +60,30 @@ test('без суммы — null: бот ответит подсказкой, а
   assert.equal(parseQuick('cx22 сервер 10')?.amount, m(10), 'цифры внутри слова — не сумма');
 });
 
-test('вид и проект по словам заметки', () => {
+test('вид и проект по словам заметки — кодами, а не названиями: их владелец может переименовать', () => {
   const g = (kind: 'income' | 'expense', note: string) => guessCategory(kind, note);
   for (const w of ['сервер', 'Хостинг', 'VPS', 'впн', 'vpn сервис', 'домен', 'прокси']) {
-    assert.deepEqual(g('expense', w), { category: 'VPN — серверы и сервисы', project: 'VPN' }, w);
+    assert.deepEqual(g('expense', w), { category: 'vpn_infra', project: 'vpn' }, w);
   }
-  for (const w of ['подписка', 'сервисы', 'Claude', 'chatgpt plus']) assert.deepEqual(g('expense', w), { category: 'Сервисы и подписки', project: null }, w);
-  for (const w of ['закуп', 'реклама у Ивана']) assert.deepEqual(g('expense', w), { category: 'Закуп рекламы', project: 'Реклама' }, w);
-  assert.deepEqual(g('expense', 'кофе'), { category: 'Прочее', project: null });
+  for (const w of ['подписка', 'сервисы', 'Claude', 'chatgpt plus']) assert.deepEqual(g('expense', w), { category: 'services', project: null }, w);
+  for (const w of ['закуп', 'реклама у Ивана']) assert.deepEqual(g('expense', w), { category: 'ads_buy', project: 'ads' }, w);
+  assert.deepEqual(g('expense', 'кофе'), { category: 'other_expense', project: null });
 
-  assert.deepEqual(g('income', 'сторис'), { category: 'Реклама — сторисы', project: 'Реклама' });
-  assert.deepEqual(g('income', 'пост'), { category: 'Реклама — посты', project: 'Реклама' });
-  assert.deepEqual(g('income', 'реклама'), { category: 'Реклама — посты', project: 'Реклама' });
-  assert.deepEqual(g('income', 'приветка'), { category: 'Заявки с приветки', project: null });
-  assert.deepEqual(g('income', 'заявки'), { category: 'Заявки с приветки', project: null });
-  assert.deepEqual(g('income', 'партнёрка'), { category: 'Партнёрская программа', project: null });
-  assert.deepEqual(g('income', 'рефералка'), { category: 'Партнёрская программа', project: null });
-  assert.deepEqual(g('income', 'приватка'), { category: 'Приватка', project: 'Приватка MARIN' });
-  assert.deepEqual(g('income', 'vpn'), { category: 'VPN', project: 'VPN' });
-  assert.deepEqual(g('income', ''), { category: 'Прочее', project: null });
+  assert.deepEqual(g('income', 'сторис'), { category: 'ads_stories', project: 'ads' });
+  assert.deepEqual(g('income', 'пост'), { category: 'ads_posts', project: 'ads' });
+  assert.deepEqual(g('income', 'реклама'), { category: 'ads_posts', project: 'ads' });
+  assert.deepEqual(g('income', 'приветка'), { category: 'welcome', project: null });
+  assert.deepEqual(g('income', 'заявки'), { category: 'welcome', project: null });
+  assert.deepEqual(g('income', 'партнёрка'), { category: 'partner', project: null });
+  assert.deepEqual(g('income', 'рефералка'), { category: 'partner', project: null });
+  assert.deepEqual(g('income', 'приватка'), { category: 'privat', project: 'privat' });
+  assert.deepEqual(g('income', 'vpn'), { category: 'vpn', project: 'vpn' });
+  assert.deepEqual(g('income', ''), { category: 'other_income', project: null });
 
-  assert.equal(projectOf('expense', 'Закуп рекламы'), 'Реклама');
-  assert.equal(projectOf('income', 'Реклама — сторисы'), 'Реклама');
-  assert.equal(projectOf('expense', 'Прочее'), null);
+  assert.equal(projectOf('expense', 'ads_buy'), 'ads');
+  assert.equal(projectOf('income', 'ads_stories'), 'ads');
+  assert.equal(projectOf('expense', 'other_expense'), null);
+  assert.equal(projectOf('expense', null), null);
 });
 
 test('кошелёк: USDT и без валюты — CryptoBot; рубли — первый рублёвый; архивные не в счёт', () => {

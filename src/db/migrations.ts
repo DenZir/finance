@@ -216,4 +216,29 @@ export const MIGRATIONS: readonly string[] = [
   INSERT INTO wallets (name, currency, kind, fee_pct, created_at, role) VALUES
     ('Партнёрка', 'USD', 'provider', 0, CAST(strftime('%s','now') AS INTEGER) * 1000, 'partner');
   `,
+  `
+  -- Виды и проекты теперь можно переименовывать на странице. Импорты и бот
+  -- находят свои по коду, а не по названию: «Приватка» под другим именем
+  -- осталась бы без доходов привата. Код есть только у заведённых здесь.
+  ALTER TABLE categories ADD COLUMN code TEXT;
+  ALTER TABLE projects ADD COLUMN code TEXT;
+  UPDATE categories SET code = CASE
+    WHEN kind = 'income' AND name = 'Приватка' THEN 'privat'
+    WHEN kind = 'income' AND name = 'Реклама — посты' THEN 'ads_posts'
+    WHEN kind = 'income' AND name = 'Реклама — сторисы' THEN 'ads_stories'
+    WHEN kind = 'income' AND name = 'Заявки с приветки' THEN 'welcome'
+    WHEN kind = 'income' AND name = 'Партнёрская программа' THEN 'partner'
+    WHEN kind = 'income' AND name = 'VPN' THEN 'vpn'
+    WHEN kind = 'income' AND name = 'Прочее' THEN 'other_income'
+    WHEN kind = 'expense' AND name = 'Закуп рекламы' THEN 'ads_buy'
+    WHEN kind = 'expense' AND name = 'VPN — серверы и сервисы' THEN 'vpn_infra'
+    WHEN kind = 'expense' AND name = 'Сервисы и подписки' THEN 'services'
+    WHEN kind = 'expense' AND name = 'Прочее' THEN 'other_expense'
+  END;
+  UPDATE projects SET code = CASE name
+    WHEN 'Приватка MARIN' THEN 'privat' WHEN 'Реклама' THEN 'ads' WHEN 'VPN' THEN 'vpn' WHEN 'Прочее' THEN 'other'
+  END;
+  CREATE UNIQUE INDEX categories_code ON categories(code) WHERE code IS NOT NULL;
+  CREATE UNIQUE INDEX projects_code ON projects(code) WHERE code IS NOT NULL;
+  `,
 ];

@@ -10,7 +10,7 @@
  */
 import type { Db } from './db/index.js';
 import { MoneyInputError } from './money.js';
-import { addIncome, listCategories, listWallets, type Wallet } from './ledger.js';
+import { addIncome, categoryIdByCode, listWallets, type Wallet } from './ledger.js';
 
 export const SOURCE = 'partner';
 export const ROLE = 'partner';
@@ -57,7 +57,7 @@ export function partnerCheck(
     amount: diff,
     rate: input.rate,
     feePct: 0,
-    categoryId: listCategories(db).find((c) => c.kind === 'income' && c.name === 'Партнёрская программа')?.id ?? null,
+    categoryId: categoryIdByCode(db, 'partner'),
     note: `сверка: на счёте ${fmt(input.balance)} ${w.currency}`,
     source: SOURCE,
   }, now);

@@ -8,9 +8,13 @@
 import { MoneyInputError, parseAmount } from '../money.js';
 
 export type QuickKind = 'income' | 'expense';
+/** payout — выплата партнёру, payin — партнёр докинул разницу */
+export type EntryKind = QuickKind | 'payout' | 'payin';
 
 export interface Parsed {
-  kind: QuickKind;
+  kind: EntryKind;
+  /** расход оплатил партнёр из своих денег: «партнёр сервер 20 usdt» */
+  partner: boolean;
   /** микро в валюте currency, а если она не названа — в валюте кошелька */
   amount: number;
   currency: string | null;
@@ -31,6 +35,12 @@ const AMOUNT = new RegExp(String.raw`${BEFORE}(?:(\$|₽) ?)?(${NUM})(?: ?(${CUR
 const LONE_CURRENCY = new RegExp(String.raw`(?<![\p{L}\d])(${CUR_WORDS})${AFTER}`, 'iu');
 const INCOME_WORD = /(?<![\p{L}\d])(?:доход\p{L}*|пришл[оаи]|получил\p{L}*)(?![\p{L}\d])/iu;
 const EXPENSE_WORD = /(?<![\p{L}\d])расход\p{L}*(?![\p{L}\d])/iu;
+// Расчёт с партнёром — по падежу: «партнёру 5000» — выплата ему, «от партнёра
+// 3000» — он докинул, «партнёр сервер 20 usdt» — расход, оплаченный им. Только
+// «партнёр» целым словом: «+10$ партнёрка» — доход партнёрки, а не он.
+const PAYIN_WORD = /(?<![\p{L}\d])от партн[её]ра(?![\p{L}\d])/iu;
+const PAYOUT_WORD = /(?<![\p{L}\d])(?:(?:выплат\p{L}*|докинул\p{L}*|отдал\p{L}*|перевел\p{L}*|перевёл\p{L}*) )?партн[её]ру(?![\p{L}\d])/iu;
+const PARTNER_PAID = /(?<![\p{L}\d])(?:(?:платит|платил|оплатил|заплатил) )?партн[её]р(?: (?:платит|платил|оплатил|заплатил))?(?![\p{L}\d])/iu;
 
 function currencyCode(token: string): string {
   const t = token.toLowerCase().replace(/\.$/, '');
@@ -45,18 +55,32 @@ const cut = (s: string, at: number, len: number) => `${s.slice(0, at)} ${s.slice
 export function parseQuick(input: string): Parsed | null {
   // неразрывные пробелы (так копируются суммы с сайтов и из банков) — обычными
   let text = input.replace(/\s+/g, ' ').trim();
-  let kind: QuickKind = 'expense';
+  let kind: EntryKind = 'expense';
   if (text.startsWith('+')) {
     kind = 'income';
     text = text.slice(1);
   } else if (/^[-−–]/.test(text)) {
     text = text.slice(1);
   }
-  const income = INCOME_WORD.exec(text);
-  const expense = income ? null : EXPENSE_WORD.exec(text);
-  if (income) kind = 'income';
-  const marker = income ?? expense;
-  if (marker) text = cut(text, marker.index, marker[0].length);
+  let partner = false;
+  const settle = PAYIN_WORD.exec(text) ?? PAYOUT_WORD.exec(text);
+  if (settle) {
+    // расчёт, а не доход и не расход: «+» и «доход» тут ничего не меняют
+    kind = /^от/i.test(settle[0]) ? 'payin' : 'payout';
+    text = cut(text, settle.index, settle[0].length);
+  } else {
+    const income = INCOME_WORD.exec(text);
+    const expense = income ? null : EXPENSE_WORD.exec(text);
+    if (income) kind = 'income';
+    const marker = income ?? expense;
+    if (marker) text = cut(text, marker.index, marker[0].length);
+    // доход со словом «партнёр» («+5000 партнёр») — по-прежнему партнёрка
+    const paid = kind === 'expense' ? PARTNER_PAID.exec(text) : null;
+    if (paid) {
+      partner = true;
+      text = cut(text, paid.index, paid[0].length);
+    }
+  }
 
   // Чисел может быть несколько («домен на 2 года 15 usdt»): сумма — то, рядом с
   // чем стоит валюта, а без валюты — первое.
@@ -86,7 +110,7 @@ export function parseQuick(input: string): Parsed | null {
     }
   }
   const note = rest.replace(/ +/g, ' ').replace(/^[\s,.;:—–-]+|[\s,.;:—–-]+$/g, '');
-  return { kind, amount: best.amount, currency, note };
+  return { kind, partner, amount: best.amount, currency, note };
 }
 
 interface Rule {

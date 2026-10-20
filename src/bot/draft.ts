@@ -9,11 +9,13 @@
 import crypto from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { MoneyInputError, toRub } from '../money.js';
-import { addExpense, addIncome, categoryIdByCode, deleteOperation, listCategories, listProjects, listWallets, projectIdByCode, type Wallet } from '../ledger.js';
+import {
+  addExpense, addIncome, addPartnerExpense, addPayin, addPayout, categoryIdByCode, deleteOperation, listCategories, listProjects, listWallets, projectIdByCode, type Wallet,
+} from '../ledger.js';
 import { partnerWallet } from '../partner.js';
 import { payRecurring, skipRecurring, SOURCE as RECURRING_SOURCE, type Recurring } from '../recurring.js';
 import { currentRate, type RateFetcher } from '../rates.js';
-import { guessCategory, parseQuick, projectOf, type QuickKind } from './parse.js';
+import { guessCategory, parseQuick, projectOf, type EntryKind } from './parse.js';
 import type { Keyboard } from './api.js';
 import { DAY, amount, ddmm, esc, monthIn, monthName, mskDayStart, mskIso, rub } from './text.js';
 
@@ -46,11 +48,11 @@ export interface Calc {
 
 export interface Draft {
   id: string;
-  kind: QuickKind;
+  kind: EntryKind;
   amount: number;
   /** валюта, названная в строке; null — валюта кошелька */
   currency: string | null;
-  /** null — регулярный расход, который оплачивает партнёр: кошелька нет */
+  /** null — расход оплачивает партнёр («партнёр …» или регулярный): кошелька нет */
   walletId: number | null;
   categoryId: number | null;
   projectId: number | null;
@@ -85,7 +87,8 @@ interface Card {
   title: string;
   sum: string;
   wallet: string;
-  category: string;
+  /** null — у расчёта с партнёром вида нет */
+  category: string | null;
   project: string;
   date: string;
   note: string;
@@ -95,7 +98,7 @@ export function cardText(c: Card): string {
   return [
     `<b>${c.title} · ${c.sum}</b>`,
     `Кошелёк: ${esc(c.wallet)}`,
-    `Вид: ${esc(c.category)}`,
+    c.category === null ? '' : `Вид: ${esc(c.category)}`,
     `Проект: ${esc(c.project)}`,
     `Дата: ${c.date}`,
     c.note ? `Заметка: ${esc(c.note)}` : '',
@@ -104,7 +107,10 @@ export function cardText(c: Card): string {
 
 const TTL_MS = DAY;
 const NOON = 12 * 3600_000;
-const KIND_TITLE: Record<QuickKind, string> = { income: 'Доход', expense: 'Расход' };
+const KIND_TITLE: Record<EntryKind, string> = { income: 'Доход', expense: 'Расход', payout: 'Выплата партнёру', payin: 'От партнёра' };
+const isSettlement = (kind: EntryKind): kind is 'payout' | 'payin' => kind === 'payout' || kind === 'payin';
+/** Проекты, у которых есть партнёр: только к ним расход партнёра и расчёт с ним. */
+const partnerProjects = (db: Db) => listProjects(db).filter((p) => p.partnerPct > 0);
 // Короткие коды кнопок: callback_data — не больше 64 байт.
 const cb = (id: string, action: string, arg?: number) => `q:${id}:${action}${arg === undefined ? '' : `:${arg}`}`;
 /** Дата без времени — полдень по Москве, как на странице: операция не уедет в соседние сутки. */
@@ -127,10 +133,10 @@ function opCard(db: Db, opId: number): Card | null {
     ? `${amount(op.paid_amount, op.paid_currency)} ≈ ${rub(op.gross_rub)}`
     : !wallet || !entry || wallet.currency === 'RUB' ? rub(op.gross_rub) : `${amount(Math.abs(entry.amount), wallet.currency)} ≈ ${rub(op.gross_rub)}`;
   return {
-    title: op.kind === 'income' ? 'Доход' : 'Расход',
+    title: KIND_TITLE[op.kind as EntryKind] ?? 'Операция',
     sum,
     wallet: op.paid_by === 'partner' ? 'платит партнёр' : wallet?.name ?? '—',
-    category: nameById(db, 'categories', op.category_id),
+    category: op.kind === 'payout' || op.kind === 'payin' ? null : nameById(db, 'categories', op.category_id),
     project: nameById(db, 'projects', op.project_id),
     date: ddmm(mskIso(op.at)),
     note: op.note,
@@ -156,6 +162,13 @@ export class QuickEntry {
     if (parsed.kind === 'income' && guessed.categoryId !== null && guessed.categoryId === categoryIdByCode(db, 'partner')) {
       wallet = partnerWallet(db) ?? wallet;
     }
+    const partnerSide = parsed.partner || isSettlement(parsed.kind);
+    if (partnerSide) {
+      // проект с партнёром: угаданный по словам («партнёр сервер …» — VPN), иначе первый
+      const own = partnerProjects(db);
+      if (!own.length) return { text: 'Нет проекта с партнёром — задайте долю партнёра у проекта на странице «Деньги».' };
+      guessed.projectId = own.find((p) => p.id === guessed.projectId)?.id ?? own[0]!.id;
+    }
     const t = now();
     for (const [id, d] of this.drafts) if (t - d.createdAt > TTL_MS) this.drafts.delete(id);
     const d: Draft = {
@@ -165,7 +178,7 @@ export class QuickEntry {
       // Без валюты — рубли: владелец считает в рублях (цены рекламы, тарифы), и
       // «+1500 сторис» на CryptoBot — это 1 500 ₽ ≈ 18 USDT, а не 1 500 USDT.
       currency: parsed.currency ?? 'RUB',
-      walletId: wallet.id,
+      walletId: parsed.partner ? null : wallet.id,
       ...guessed,
       day: mskDayStart(t),
       yesterday: false,
@@ -239,11 +252,32 @@ export class QuickEntry {
     const { db } = this.deps;
     switch (m[2]) {
       case 'k':
+        if (isSettlement(d.kind)) {
+          d.kind = d.kind === 'payout' ? 'payin' : 'payout';
+          return this.render(d, 'main');
+        }
+        if (d.walletId === null) return { answer: 'Платит партнёр — это расход' };
         d.kind = d.kind === 'income' ? 'expense' : 'income';
         // виды у дохода и расхода свои — угадываем заново
         Object.assign(d, this.guess(d.kind, d.note));
         return this.render(d, 'main');
+      case 'm': {
+        // кто платит расход: я ⇄ партнёр
+        if (d.recurring || d.kind !== 'expense') return { answer: 'Кнопка устарела' };
+        if (d.walletId === null) {
+          const w = pickWallet(listWallets(db), d.currency);
+          if (!w) return { answer: 'Кошельков нет', alert: true };
+          d.walletId = w.id;
+          return this.render(d, 'main');
+        }
+        const own = partnerProjects(db);
+        if (!own.length) return { answer: 'Нет проекта с партнёром', alert: true };
+        d.walletId = null;
+        d.projectId = own.find((p) => p.id === d.projectId)?.id ?? own[0]!.id;
+        return this.render(d, 'main');
+      }
       case 'c': {
+        if (isSettlement(d.kind)) return { answer: 'У расчёта с партнёром вида нет' };
         if (arg === null) return this.render(d, 'cat');
         const cat = listCategories(db).find((c) => c.id === arg && c.kind === d.kind);
         if (!cat) return { answer: 'Такого вида нет' };
@@ -252,12 +286,14 @@ export class QuickEntry {
         if (project) d.projectId = projectIdByCode(db, project) ?? d.projectId;
         return this.render(d, 'main');
       }
-      case 'p':
-        if (d.walletId === null) return { answer: 'Платит партнёр — проект задан в регулярном расходе' };
+      case 'p': {
+        if (d.walletId === null && d.recurring) return { answer: 'Платит партнёр — проект задан в регулярном расходе' };
         if (arg === null) return this.render(d, 'proj');
-        if (arg !== 0 && !listProjects(db).some((p) => p.id === arg)) return { answer: 'Такого проекта нет' };
+        const onlyPartner = d.walletId === null || isSettlement(d.kind);
+        if (onlyPartner ? !partnerProjects(db).some((p) => p.id === arg) : arg !== 0 && !listProjects(db).some((p) => p.id === arg)) return { answer: 'Такого проекта нет' };
         d.projectId = arg === 0 ? null : arg;
         return this.render(d, 'main');
+      }
       case 'w':
         if (d.walletId === null) return { answer: 'Платит партнёр — кошелёк не нужен' };
         if (arg === null) return this.render(d, 'wallet');
@@ -290,7 +326,8 @@ export class QuickEntry {
     }
   }
 
-  private guess(kind: QuickKind, note: string): { categoryId: number | null; projectId: number | null } {
+  private guess(kind: EntryKind, note: string): { categoryId: number | null; projectId: number | null } {
+    if (isSettlement(kind)) return { categoryId: null, projectId: null };
     const g = guessCategory(kind, note);
     const { db } = this.deps;
     return {
@@ -355,7 +392,7 @@ export class QuickEntry {
       title: KIND_TITLE[d.kind],
       sum,
       wallet: wallet ? wallet.name : 'платит партнёр',
-      category: nameById(db, 'categories', d.categoryId),
+      category: isSettlement(d.kind) ? null : nameById(db, 'categories', d.categoryId),
       project: nameById(db, 'projects', d.projectId),
       date: `${ddmm(mskIso(at))}, ${d.yesterday ? 'вчера' : 'сегодня'}`,
       note: d.note,
@@ -375,10 +412,12 @@ export class QuickEntry {
     if (view === 'cat') {
       keyboard = choose(listCategories(db).filter((c) => c.kind === d.kind).map((c) => ({ id: c.id, label: c.name, on: c.id === d.categoryId })), 'c');
     } else if (view === 'proj') {
-      keyboard = choose(
-        [...listProjects(db).map((p) => ({ id: p.id, label: p.name, on: p.id === d.projectId })), { id: 0, label: 'Без проекта', on: d.projectId === null }],
-        'p'
-      );
+      keyboard = partner || isSettlement(d.kind)
+        ? choose(partnerProjects(db).map((p) => ({ id: p.id, label: p.name, on: p.id === d.projectId })), 'p')
+        : choose(
+          [...listProjects(db).map((p) => ({ id: p.id, label: p.name, on: p.id === d.projectId })), { id: 0, label: 'Без проекта', on: d.projectId === null }],
+          'p'
+        );
     } else if (view === 'wallet') {
       keyboard = choose(wallets.filter((w) => !w.archived).map((w) => ({ id: w.id, label: `${w.name} · ${w.currency}`, on: w.id === d.walletId })), 'w');
     } else {
@@ -390,6 +429,14 @@ export class QuickEntry {
         [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: '⏭ Пропустить в этом месяце', callback_data: cb(d.id, 's') }],
         [{ text: 'Вид', callback_data: cb(d.id, 'c') }, { text: 'Проект', callback_data: cb(d.id, 'p') }, { text: 'Кошелёк', callback_data: cb(d.id, 'w') }],
         [{ text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }],
+      ] : isSettlement(d.kind) ? [
+        [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: d.kind === 'payout' ? 'Это от партнёра' : 'Это партнёру', callback_data: cb(d.id, 'k') }],
+        [{ text: 'Кошелёк', callback_data: cb(d.id, 'w') }, ...(partnerProjects(db).length > 1 ? [{ text: 'Проект', callback_data: cb(d.id, 'p') }] : [])],
+        [{ text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }, { text: 'Отмена', callback_data: cb(d.id, 'x') }],
+      ] : partner ? [
+        [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: 'Плачу я', callback_data: cb(d.id, 'm') }],
+        [{ text: 'Вид', callback_data: cb(d.id, 'c') }, ...(partnerProjects(db).length > 1 ? [{ text: 'Проект', callback_data: cb(d.id, 'p') }] : [])],
+        [{ text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }, { text: 'Отмена', callback_data: cb(d.id, 'x') }],
       ] : [
         [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: 'Расход ⇄ Доход', callback_data: cb(d.id, 'k') }],
         [{ text: 'Вид', callback_data: cb(d.id, 'c') }, { text: 'Проект', callback_data: cb(d.id, 'p') }, { text: 'Кошелёк', callback_data: cb(d.id, 'w') }],
@@ -403,7 +450,7 @@ export class QuickEntry {
   private save(d: Draft): Outcome {
     const { db, now } = this.deps;
     if (!d.calc) return { answer: d.problem ?? 'Нечего записывать', alert: true };
-    if (!d.recurring && d.walletId === null) return { answer: 'Нет кошелька — пришлите заново', alert: true };
+    if (d.walletId === null && d.kind !== 'expense') return { answer: 'Нет кошелька — пришлите заново', alert: true };
     const base = {
       at: atOf(d),
       walletId: d.walletId ?? 0,
@@ -417,9 +464,17 @@ export class QuickEntry {
     let id: number;
     try {
       // Доход из бота — перевод на кошелёк, а не приём платёжки: комиссии нет.
-      id = d.recurring
-        ? payRecurring(db, d.recurring.id, d.recurring.month, { walletId: d.walletId, amount: d.calc.walletAmount, rate: d.calc.rate, at: atOf(d), currency: d.currency ?? undefined }, now())
-        : d.kind === 'income' ? addIncome(db, { ...base, feePct: 0 }, now()) : addExpense(db, base, now());
+      if (d.recurring) {
+        id = payRecurring(db, d.recurring.id, d.recurring.month, { walletId: d.walletId, amount: d.calc.walletAmount, rate: d.calc.rate, at: atOf(d), currency: d.currency ?? undefined }, now());
+      } else if (d.walletId === null) {
+        // платит партнёр: сумма в его валюте, кошельки владельца не трогаются
+        id = addPartnerExpense(db, { ...base, amount: d.amount, currency: d.currency ?? 'RUB' }, now());
+      } else if (isSettlement(d.kind)) {
+        if (d.projectId === null) return { answer: 'Выберите проект с партнёром', alert: true };
+        id = (d.kind === 'payout' ? addPayout : addPayin)(db, { ...base, projectId: d.projectId }, now());
+      } else {
+        id = d.kind === 'income' ? addIncome(db, { ...base, feePct: 0 }, now()) : addExpense(db, base, now());
+      }
       // вид и проект, поправленные в черновике, — у этой записи
       if (d.recurring) db.prepare('UPDATE operations SET category_id = ?, project_id = ? WHERE id = ?').run(d.categoryId, d.projectId, id);
     } catch (err) {

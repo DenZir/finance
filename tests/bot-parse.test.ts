@@ -13,12 +13,12 @@ import type { Wallet } from '../src/ledger.js';
 const m = (n: number) => Math.round(n * MICRO);
 
 test('примеры владельца: вид, сумма, валюта и заметка', () => {
-  assert.deepEqual(parseQuick('сервер 20 usdt'), { kind: 'expense', amount: m(20), currency: 'USDT', note: 'сервер' });
-  assert.deepEqual(parseQuick('20$ хостинг'), { kind: 'expense', amount: m(20), currency: 'USDT', note: 'хостинг' });
-  assert.deepEqual(parseQuick('хостинг 1 500 ₽'), { kind: 'expense', amount: m(1500), currency: 'RUB', note: 'хостинг' });
-  assert.deepEqual(parseQuick('+1500 сторис'), { kind: 'income', amount: m(1500), currency: null, note: 'сторис' });
-  assert.deepEqual(parseQuick('доход 300 приватка'), { kind: 'income', amount: m(300), currency: null, note: 'приватка' });
-  assert.deepEqual(parseQuick('20,5 ton'), { kind: 'expense', amount: m(20.5), currency: 'TON', note: '' });
+  assert.deepEqual(parseQuick('сервер 20 usdt'), { kind: 'expense', partner: false, amount: m(20), currency: 'USDT', note: 'сервер' });
+  assert.deepEqual(parseQuick('20$ хостинг'), { kind: 'expense', partner: false, amount: m(20), currency: 'USDT', note: 'хостинг' });
+  assert.deepEqual(parseQuick('хостинг 1 500 ₽'), { kind: 'expense', partner: false, amount: m(1500), currency: 'RUB', note: 'хостинг' });
+  assert.deepEqual(parseQuick('+1500 сторис'), { kind: 'income', partner: false, amount: m(1500), currency: null, note: 'сторис' });
+  assert.deepEqual(parseQuick('доход 300 приватка'), { kind: 'income', partner: false, amount: m(300), currency: null, note: 'приватка' });
+  assert.deepEqual(parseQuick('20,5 ton'), { kind: 'expense', partner: false, amount: m(20.5), currency: 'TON', note: '' });
 });
 
 test('разряды пробелом и неразрывным пробелом, дробь запятой и точкой', () => {
@@ -28,9 +28,9 @@ test('разряды пробелом и неразрывным пробелом
   assert.equal(parseQuick('0.001 btc')?.amount, m(0.001));
   assert.equal(parseQuick('20,5 ton')?.amount, m(20.5));
   // «2 сервера» — не «2 тысячи с чем-то»: пробел разрядов только между тройками
-  assert.deepEqual(parseQuick('2 сервера 40 usdt'), { kind: 'expense', amount: m(40), currency: 'USDT', note: '2 сервера' });
+  assert.deepEqual(parseQuick('2 сервера 40 usdt'), { kind: 'expense', partner: false, amount: m(40), currency: 'USDT', note: '2 сервера' });
   // чисел несколько — сумма та, что с валютой
-  assert.deepEqual(parseQuick('домен на 2 года 15 usdt'), { kind: 'expense', amount: m(15), currency: 'USDT', note: 'домен на 2 года' });
+  assert.deepEqual(parseQuick('домен на 2 года 15 usdt'), { kind: 'expense', partner: false, amount: m(15), currency: 'USDT', note: 'домен на 2 года' });
 });
 
 test('валюта: слова, знаки, регистр; «рубашка» и «tonight» — не валюта', () => {
@@ -42,17 +42,17 @@ test('валюта: слова, знаки, регистр; «рубашка» �
   assert.equal(cur('0,01 Btc'), 'BTC');
   assert.equal(cur('eth 0,5'), 'ETH', 'валюта может стоять и отдельно от суммы');
   assert.equal(cur('usdt 20 сервер'), 'USDT');
-  assert.deepEqual(parseQuick('20 рублей за рубашку'), { kind: 'expense', amount: m(20), currency: 'RUB', note: 'за рубашку' });
-  assert.deepEqual(parseQuick('20 tonight'), { kind: 'expense', amount: m(20), currency: null, note: 'tonight' });
+  assert.deepEqual(parseQuick('20 рублей за рубашку'), { kind: 'expense', partner: false, amount: m(20), currency: 'RUB', note: 'за рубашку' });
+  assert.deepEqual(parseQuick('20 tonight'), { kind: 'expense', partner: false, amount: m(20), currency: null, note: 'tonight' });
   assert.equal(cur('сервер 20'), null, 'не названа — валюта кошелька');
 });
 
 test('доход: «+», «доход», «пришло», «получил»; иначе расход', () => {
   assert.equal(parseQuick('+ 300 приватка')?.kind, 'income');
-  assert.deepEqual(parseQuick('пришло 500 ₽ за пост'), { kind: 'income', amount: m(500), currency: 'RUB', note: 'за пост' });
-  assert.deepEqual(parseQuick('Получил 1000 рефералка'), { kind: 'income', amount: m(1000), currency: null, note: 'рефералка' });
-  assert.deepEqual(parseQuick('-20 сервер'), { kind: 'expense', amount: m(20), currency: null, note: 'сервер' });
-  assert.deepEqual(parseQuick('расход 20 usdt vps'), { kind: 'expense', amount: m(20), currency: 'USDT', note: 'vps' });
+  assert.deepEqual(parseQuick('пришло 500 ₽ за пост'), { kind: 'income', partner: false, amount: m(500), currency: 'RUB', note: 'за пост' });
+  assert.deepEqual(parseQuick('Получил 1000 рефералка'), { kind: 'income', partner: false, amount: m(1000), currency: null, note: 'рефералка' });
+  assert.deepEqual(parseQuick('-20 сервер'), { kind: 'expense', partner: false, amount: m(20), currency: null, note: 'сервер' });
+  assert.deepEqual(parseQuick('расход 20 usdt vps'), { kind: 'expense', partner: false, amount: m(20), currency: 'USDT', note: 'vps' });
 });
 
 test('без суммы — null: бот ответит подсказкой, а не запишет мусор', () => {
@@ -98,4 +98,22 @@ test('кошелёк: USDT и без валюты — CryptoBot; рубли — 
   assert.equal(pickWallet(noCryptobot, 'USDT')?.name, 'Tonkeeper');
   assert.equal(pickWallet(noCryptobot, null)?.name, 'Platega', 'без CryptoBot — первый кошелёк');
   assert.equal(pickWallet([], null), null);
+});
+
+// Расчёт с партнёром строкой (владелец, 2026-10-20): по падежу, а «партнёрка» — по-прежнему доход партнёрки.
+test('партнёр: «партнёру 5000» — выплата, «от партнёра» — он докинул, «партнёр …» — его расход', () => {
+  const p = (s: string) => { const r = parseQuick(s)!; return [r.kind, r.partner, r.amount, r.currency, r.note]; };
+  assert.deepEqual(p('партнёру 5000'), ['payout', false, m(5000), null, '']);
+  assert.deepEqual(p('Партнеру 5 000 ₽ за октябрь'), ['payout', false, m(5000), 'RUB', 'за октябрь']);
+  assert.deepEqual(p('выплата партнёру 3000'), ['payout', false, m(3000), null, '']);
+  assert.deepEqual(p('+5000 партнёру'), ['payout', false, m(5000), null, ''], '«+» не делает выплату доходом');
+  assert.deepEqual(p('от партнёра 1500'), ['payin', false, m(1500), null, '']);
+  assert.deepEqual(p('+1 500 от партнера разница'), ['payin', false, m(1500), null, 'разница']);
+  assert.deepEqual(p('партнёр сервер 20 usdt'), ['expense', true, m(20), 'USDT', 'сервер']);
+  assert.deepEqual(p('сервер 20$ платил партнёр'), ['expense', true, m(20), 'USDT', 'сервер']);
+  assert.deepEqual(p('домен 300 партнер оплатил'), ['expense', true, m(300), null, 'домен']);
+  // не он
+  assert.deepEqual(p('+10$ партнёрка'), ['income', false, m(10), 'USDT', 'партнёрка']);
+  assert.deepEqual(p('+5000 партнёр'), ['income', false, m(5000), null, 'партнёр'], 'доход со словом «партнёр» — партнёрка, как раньше');
+  assert.deepEqual(p('партнерская ссылка 100'), ['expense', false, m(100), null, 'партнерская ссылка']);
 });

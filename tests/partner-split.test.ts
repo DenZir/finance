@@ -150,3 +150,70 @@ test('бот: черновик регулярного расхода партн�
   assert.match(String(tg.calls.filter((c) => c.method === 'editMessageText').at(-1)!.params.text), /Записано[\s\S]*Кошелёк: платит партнёр/);
   assert.ok(listProjects(db).find((p) => p.id === vpn)!.partnerPct > 0);
 });
+
+// Владелец, 2026-10-20: выплату партнёру и его расход — строкой в боте, как любую запись.
+test('бот: «партнёру 5000», «от партнёра 1000», «партнёр сервер 20 usdt» — без страницы', async () => {
+  const { db, vpn, debt } = setup();
+  const OWNER = 111;
+  const tg = fakeTelegram();
+  const bot = createBot({ db, api: tg.api, ownerIds: [String(OWNER)], fetchRate: async (c) => ({ USDT: 90, USD: 90 } as Record<string, number>)[c] ?? null, now: () => AT });
+  const last = (method: string) => tg.calls.filter((c) => c.method === method).at(-1)!;
+  const btns = (c: { params: Record<string, unknown> }) => (JSON.parse(JSON.stringify(c.params.reply_markup)).inline_keyboard as { text: string; callback_data: string }[][]).flat();
+  const say = (text: string) => bot.handleUpdate({ update_id: 1, message: { message_id: 1, date: 0, chat: { id: OWNER, type: 'private' }, from: { id: OWNER }, text } } as any);
+  const tap = (c: { params: Record<string, unknown> }, label: string) => {
+    const b = btns(c).find((x) => x.text.includes(label));
+    assert.ok(b, `нет кнопки «${label}»: ${btns(c).map((x) => x.text).join(', ')}`);
+    return bot.handleUpdate({ update_id: 2, callback_query: { id: 'q', from: { id: OWNER }, message: { message_id: 100, date: 0, chat: { id: OWNER, type: 'private' } }, data: b.callback_data } });
+  };
+  const text = (c: { params: Record<string, unknown> }) => String(c.params.text).replace(/<[^>]+>/g, '');
+
+  // выплата
+  await say('партнёру 5000 за октябрь');
+  let draft = last('sendMessage');
+  // валюта не названа — как любая строка: рубли, пересчитанные на CryptoBot; кошелёк — кнопкой
+  assert.match(text(draft), /^Выплата партнёру · 5[\s ]000 ₽ ≈ 55,56 USDT\nКошелёк: CryptoBot\nПроект: VPN\nДата: 19\.10, сегодня\nЗаметка: за октябрь$/, 'вида у выплаты нет');
+  assert.ok(!btns(draft).some((b) => b.text === 'Вид'));
+  await tap(draft, 'Записать');
+  assert.match(text(last('editMessageText')), /^✅ Записано\nВыплата партнёру · 55,56 USDT ≈ 5[\s ]000 ₽\nКошелёк: CryptoBot\nПроект: VPN\n/);
+  assert.equal(debt().paidOut, rub(5_000));
+  assert.equal(debt().owed, -rub(5_000), 'доходов ещё нет — переплата');
+
+  // «Это от партнёра» переворачивает выплату
+  await say('партнёру 1000');
+  draft = last('sendMessage');
+  await tap(draft, 'Это от партнёра');
+  assert.match(text(last('editMessageText')), /^От партнёра · 1[\s ]000 ₽ ≈ 11,11 USDT/);
+  await tap(last('editMessageText'), 'Записать');
+  assert.equal(debt().paidIn, rub(1_000));
+
+  // расход партнёра: без кошелька, в его валюте; «Отменить» удаляет
+  await say('партнёр сервер 20 usdt');
+  draft = last('sendMessage');
+  assert.match(text(draft), /^Расход · 20 USDT ≈ 1[\s ]800 ₽\nКошелёк: платит партнёр\nВид: VPN — серверы и сервисы\nПроект: VPN/);
+  assert.ok(!btns(draft).some((b) => b.text === 'Кошелёк' || b.text.includes('Доход')));
+  await tap(draft, 'Записать');
+  const saved = last('editMessageText');
+  assert.match(text(saved), /Записано\nРасход · 20 USDT ≈ 1[\s ]800 ₽\nКошелёк: платит партнёр/);
+  assert.equal(debt().expensePartner, rub(1_800));
+  await tap(saved, 'Отменить');
+  assert.equal(debt().expensePartner, 0);
+
+  // «Плачу я» — обычный расход с кошелька
+  await say('партнёр домен 300');
+  await tap(last('sendMessage'), 'Плачу я');
+  const mine = last('editMessageText');
+  assert.doesNotMatch(text(mine), /платит партнёр/);
+  assert.ok(btns(mine).some((b) => b.text === 'Кошелёк'));
+  await tap(mine, 'Записать');
+  assert.deepEqual([debt().expensePartner, debt().expenseOwner], [0, rub(300)]);
+  assert.equal(vpn, listProjects(db).find((p) => p.partnerPct > 0)!.id);
+});
+
+test('бот: без проекта с партнёром расчёт строкой не собирается', async () => {
+  const { db, vpn } = setup();
+  db.prepare('UPDATE projects SET partner_pct = 0 WHERE id = ?').run(vpn);
+  const tg = fakeTelegram();
+  const bot = createBot({ db, api: tg.api, ownerIds: ['1'], fetchRate: async () => 1, now: () => AT });
+  await bot.handleUpdate({ update_id: 1, message: { message_id: 1, date: 0, chat: { id: 1, type: 'private' }, from: { id: 1 }, text: 'партнёру 5000' } } as any);
+  assert.match(String(tg.calls.filter((c) => c.method === 'sendMessage').at(-1)!.params.text), /Нет проекта с партнёром/);
+});

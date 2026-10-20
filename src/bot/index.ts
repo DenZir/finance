@@ -4,7 +4,8 @@
  * чужой не узнал даже, что бот что-то умеет.
  *
  * Строка вроде «сервер 20 usdt» — черновик операции с кнопками; /balance —
- * остатки; /debts и напоминание раз в день — долги по рекламе.
+ * остатки; /debts и напоминание раз в день — долги по рекламе и приветке;
+ * /partner — сверка партнёрки по балансу.
  */
 import type { Db } from '../db/index.js';
 import type { RateFetcher } from '../rates.js';
@@ -14,7 +15,10 @@ import { QuickEntry, type Outcome } from './draft.js';
 import { balanceText } from './balance.js';
 import { debtsText, lastReminderDay, markReminderDay, reminderDue } from './debts.js';
 import { welcomeDebts } from '../welcome.js';
-import { mskDayStart, mskIso } from './text.js';
+import { amount, esc, mskDayStart, mskIso, rub } from './text.js';
+import { partnerCheck, partnerCounted, partnerWallet } from '../partner.js';
+import { currentRate } from '../rates.js';
+import { MoneyInputError, parseAmount, toRub } from '../money.js';
 
 export interface BotDeps {
   db: Db;
@@ -35,11 +39,12 @@ export const HELP = [
   ...EXAMPLES.map((e) => `• ${e}`),
   '',
   'Расход — по умолчанию; доход — с «+» в начале или со словом «доход», «пришло», «получил».',
-  'Валюта: ₽, $ или usdt, ton, trx, btc, eth. Не указана — в валюте кошелька (CryptoBot — USDT).',
+  'Валюта: ₽, $ или usdt, ton, trx, btc, eth. Не указана — рубли (на CryptoBot пересчитаются в USDT).',
   'Вид, проект, кошелёк и дату можно поправить кнопками до записи.',
   '',
   '/balance — остатки кошельков',
-  '/debts — кто кому должен по рекламе',
+  '/debts — кто кому должен: реклама и приветка',
+  '/partner 125 — сколько сейчас на счёте партнёрки, $: прирост станет доходом',
 ].join('\n');
 
 const NO_AMOUNT = `Не нашёл сумму. Например: «${EXAMPLES[0]}» или «${EXAMPLES[3]}».\n/help — подробнее`;
@@ -54,8 +59,11 @@ export function createBot(deps: BotDeps) {
   const openPage: Keyboard | undefined = deps.publicUrl ? [[{ text: 'Открыть «Деньги»', url: deps.publicUrl }]] : undefined;
   const debtsNow = () => debtsText(listDeals(db), mskIso(now()), welcomeDebts(db));
 
-  async function command(chatId: number, cmd: string): Promise<void> {
+  async function command(chatId: number, cmd: string, args: string): Promise<void> {
     switch (cmd) {
+      case 'partner':
+        await send(chatId, await partnerReply(args));
+        return;
       case 'start':
       case 'help':
         await send(chatId, HELP);
@@ -73,11 +81,31 @@ export function createBot(deps: BotDeps) {
     }
   }
 
+  /** /partner 125 — сверка партнёрки по балансу в миниапке (partner.ts). */
+  async function partnerReply(args: string): Promise<string> {
+    const w = partnerWallet(db);
+    if (!w) return 'Кошелька «Партнёрка» нет.';
+    const counted = partnerCounted(db, now());
+    if (!args) return `Партнёрка: насчитано ${amount(counted, w.currency)}.\nЗайдите в миниапку и пришлите, сколько на счёте сейчас: /partner 125`;
+    try {
+      const balance = parseAmount(args.replace(/\$|usd/gi, '').trim(), { allowZero: true });
+      const rate = await currentRate(db, w.currency, fetchRate, now());
+      if (rate === null) return `Нет курса ${w.currency} — сверьте на странице, вписав курс.`;
+      const r = partnerCheck(db, { balance, at: now(), rate }, now());
+      return r.income
+        ? `Записано: доход «Партнёрская программа» +${amount(r.income, w.currency)} (≈ ${rub(toRub(r.income, rate))}).`
+        : 'Нового дохода нет — на счёте столько же, сколько насчитано.';
+    } catch (err) {
+      if (err instanceof MoneyInputError) return esc(err.message);
+      throw err;
+    }
+  }
+
   async function onMessage(msg: TgMessage): Promise<void> {
     if (msg.chat.type !== 'private' || !isOwner(msg.from?.id) || typeof msg.text !== 'string') return;
     const text = msg.text.trim();
-    const cmd = /^\/([a-z_]+)(?:@\w+)?(?:\s|$)/i.exec(text)?.[1];
-    if (cmd) return command(msg.chat.id, cmd.toLowerCase());
+    const m = /^\/([a-z_]+)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text);
+    if (m) return command(msg.chat.id, m[1]!.toLowerCase(), (m[2] ?? '').trim());
     const out = await quick.start(text);
     await send(msg.chat.id, out?.text ?? NO_AMOUNT, out?.keyboard);
   }

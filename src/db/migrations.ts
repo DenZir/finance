@@ -210,4 +210,10 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX welcome_fixes_deal ON welcome_fixes(deal_id);
   `,
+  `
+  -- Партнёрская программа: начисления в долларах на счёте в её миниапке, пока
+  -- не выведены (partner.ts). Как платёжка — деньги ещё «не выведены».
+  INSERT INTO wallets (name, currency, kind, fee_pct, created_at, role) VALUES
+    ('Партнёрка', 'USD', 'provider', 0, CAST(strftime('%s','now') AS INTEGER) * 1000, 'partner');
+  `,
 ];

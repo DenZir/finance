@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import type { Db } from '../db/index.js';
 import { MoneyInputError, toRub } from '../money.js';
 import { addExpense, addIncome, deleteOperation, listCategories, listProjects, listWallets, type Wallet } from '../ledger.js';
+import { partnerWallet } from '../partner.js';
 import { currentRate, type RateFetcher } from '../rates.js';
 import { guessCategory, parseQuick, projectOf, type QuickKind } from './parse.js';
 import type { Keyboard } from './api.js';
@@ -137,8 +138,13 @@ export class QuickEntry {
     const parsed = parseQuick(text);
     if (!parsed) return null;
     const { db, now } = this.deps;
-    const wallet = pickWallet(listWallets(db), parsed.currency);
+    let wallet = pickWallet(listWallets(db), parsed.currency);
     if (!wallet) return { text: 'Кошельков нет — заведите их на странице «Деньги».' };
+    const guessed = this.guess(parsed.kind, parsed.note);
+    // доход партнёрки ложится на её счёт — иначе следующая сверка по балансу посчитает его второй раз
+    if (parsed.kind === 'income' && listCategories(db).find((c) => c.id === guessed.categoryId)?.name === 'Партнёрская программа') {
+      wallet = partnerWallet(db) ?? wallet;
+    }
     const t = now();
     for (const [id, d] of this.drafts) if (t - d.createdAt > TTL_MS) this.drafts.delete(id);
     const d: Draft = {
@@ -149,7 +155,7 @@ export class QuickEntry {
       // «+1500 сторис» на CryptoBot — это 1 500 ₽ ≈ 18 USDT, а не 1 500 USDT.
       currency: parsed.currency ?? 'RUB',
       walletId: wallet.id,
-      ...this.guess(parsed.kind, parsed.note),
+      ...guessed,
       day: mskDayStart(t),
       yesterday: false,
       // как на странице — 500 знаков: длиннее и черновик не влезет в сообщение Telegram

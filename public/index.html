@@ -148,6 +148,20 @@
   </form>
 </dialog>
 
+<dialog id="partnerDlg" class="dlg">
+  <form id="partnerForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Сверка партнёрки</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="fields">
+      <label>На счёте в миниапке, $<input name="balance" inputmode="decimal" required placeholder="125,40"></label>
+      <label>Дата<input type="date" name="date" required></label>
+      <label data-rate="rate">Курс $ к ₽<input name="rate" inputmode="decimal" placeholder="текущий"></label>
+    </div>
+    <p id="partnerCounted" class="hint"></p>
+    <p id="partnerError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn primary" type="submit">Сверить</button></div>
+  </form>
+</dialog>
+
 <dialog id="walletDlg" class="dlg">
   <form id="walletForm" method="dialog" novalidate>
     <div class="dlg-h"><h3>Новый кошелёк</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>

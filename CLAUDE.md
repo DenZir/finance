@@ -39,7 +39,9 @@ npm run typecheck  # tsc --noEmit
 - `src/server.ts` — API и раздача `public/`.
 - `src/import/botprivat.ts` — оплаты привата из ботприватa; `src/ads.ts` — сделки
   рекламы из tg-analytics (оплачено / ждём оплату / бартер); `src/vpn.ts` —
-  оплаты VPN из tg-analytics на кошельки с ролью `vpn:platega` / `vpn:cryptobot`.
+  оплаты VPN из tg-analytics на кошельки с ролью `vpn:platega` / `vpn:cryptobot`;
+  `src/welcome.ts` — «Приветка» (размещения и фиксации заявок); `src/partner.ts` —
+  партнёрка: доход по балансу кошелька с ролью `partner`.
 - `src/bot/` — бот входа он же бот учёта: запись строкой, /balance, /debts,
   напоминание о долгах. Bot API — через `fetch`, без библиотек.
 

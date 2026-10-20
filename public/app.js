@@ -316,6 +316,20 @@ function openFixPay(fixId) {
   });
 }
 
+// --- партнёрка: доход по балансу в миниапке ----------------------------------------
+function openPartner() {
+  const w = S.wallets.find((x) => x.role === 'partner');
+  if (!w) return;
+  const f = $('#partnerForm');
+  f.reset();
+  $('#partnerError').hidden = true;
+  f.date.value = todayIso();
+  f.querySelector('[data-rate]').hidden = w.currency === 'RUB';
+  $('#partnerCounted').textContent = `Насчитано сейчас: ${amt(w.balance, w.currency)}. Впишите, сколько на счёте в миниапке, — прирост станет доходом «Партнёрская программа». Выводы вносите «Переводом» с «Партнёрки».`;
+  $('#partnerDlg').showModal();
+  f.balance.focus();
+}
+
 // --- VPN: оплаты без платёжки ----------------------------------------------------
 // как их называет VPN-бот → кнопка и кошелёк (роль vpn:<имя>)
 const VPN_PROVIDERS = [
@@ -434,6 +448,7 @@ function renderWallets() {
           <div class="nm"><span>${esc(w.name)}</span><span class="chip">${KIND_LABEL[w.kind] ?? w.kind}${w.feePct ? ` · ${w.feePct}%` : ''}</span></div>
           <b>${amt(w.balance, w.currency)}</b>
           <small>${w.currency === 'RUB' ? '&nbsp;' : w.rubEstimate == null ? 'курса нет' : `≈ ${rub(w.rubEstimate)} · 1 ${esc(w.currency)} = ${w.rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`}</small>
+          ${w.role === 'partner' ? '<button class="btn wallet-act" type="button" data-partner title="Вписать баланс из миниапки — прирост станет доходом">Сверить</button>' : ''}
         </div>`
         )
         .join('')
@@ -684,6 +699,26 @@ $('#adsBar').addEventListener('click', async (e) => {
     for (const x of buttons) x.disabled = false;
   }
 });
+$('#wallets').addEventListener('click', (e) => {
+  if (e.target.closest('[data-partner]')) openPartner();
+});
+$('#partnerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const [y, m, d] = String(f.date || todayIso()).split('-').map(Number);
+  // сегодня — сейчас, а не полдень: сверка сравнивает с тем, что насчитано на этот момент
+  const at = f.date === todayIso() ? Date.now() : Date.UTC(y, m - 1, d, 20, 59) - MSK;
+  try {
+    const r = await api('/api/partner/check', { method: 'POST', body: JSON.stringify({ ...f, at }) });
+    $('#partnerDlg').close();
+    await load();
+    toast(r.income ? `Доход партнёрки: +${amt(r.income, r.currency)}` : 'Нового дохода нет — на счёте столько же, сколько насчитано');
+  } catch (err) {
+    $('#partnerError').textContent = err.message;
+    $('#partnerError').hidden = false;
+  }
+});
+
 $('#addWelcome').addEventListener('click', () => openWelcome(null));
 $('#welcome').addEventListener('click', async (e) => {
   const b = e.target.closest('button');

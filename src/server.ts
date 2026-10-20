@@ -19,6 +19,7 @@ import {
 import { currentRate, type RateFetcher } from './rates.js';
 import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
 import { listUnsorted, resolveVpn } from './vpn.js';
+import { partnerCheck, partnerCounted, partnerWallet } from './partner.js';
 import { createWelcome, deleteFix, deleteWelcome, fixWelcome, listWelcome, payFix, updateWelcome, welcomeDebts } from './welcome.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -223,6 +224,22 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
         walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
       }, now());
       res.json({ id });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- партнёрка -----------------------------------------------------------------
+  app.get('/api/partner', (_req, res) => {
+    const w = partnerWallet(db);
+    res.json(w ? { walletId: w.id, currency: w.currency, counted: partnerCounted(db, now()) } : null);
+  });
+  app.post('/api/partner/check', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const w = partnerWallet(db);
+      if (!w) throw new MoneyInputError('нет кошелька «Партнёрка»');
+      res.json(partnerCheck(db, { balance: parseAmount(b.balance, { allowZero: true }), at: Number(b.at) || now(), rate: await rateFor(w.currency, b.rate) }, now()));
     } catch (err) {
       next(err);
     }

@@ -11,10 +11,11 @@ import type { Db } from '../db/index.js';
 import { MoneyInputError, toRub } from '../money.js';
 import { addExpense, addIncome, categoryIdByCode, deleteOperation, listCategories, listProjects, listWallets, projectIdByCode, type Wallet } from '../ledger.js';
 import { partnerWallet } from '../partner.js';
+import { payRecurring, skipRecurring, SOURCE as RECURRING_SOURCE, type Recurring } from '../recurring.js';
 import { currentRate, type RateFetcher } from '../rates.js';
 import { guessCategory, parseQuick, projectOf, type QuickKind } from './parse.js';
 import type { Keyboard } from './api.js';
-import { DAY, amount, ddmm, esc, mskDayStart, mskIso, rub } from './text.js';
+import { DAY, amount, ddmm, esc, monthIn, monthName, mskDayStart, mskIso, rub } from './text.js';
 
 export const SOURCE = 'bot';
 
@@ -61,12 +62,16 @@ export interface Draft {
   /** почему записать нельзя (нет курса) */
   problem: string | null;
   savedOpId: number | null;
+  /** черновик регулярного расхода за месяц (recurring.ts); null — обычный */
+  recurring: { id: number; month: string } | null;
 }
 
 /** Что сделать с сообщением после нажатия. */
 export interface Outcome {
   /** новый текст сообщения; нет — сообщение не трогаем */
   text?: string;
+  /** черновик, к которому это сообщение: ответ на него правит сумму */
+  draftId?: string;
   keyboard?: Keyboard;
   /** ответ на нажатие — всплывающая строка */
   answer?: string;
@@ -130,6 +135,8 @@ function opCard(db: Db, opId: number): Card | null {
 
 export class QuickEntry {
   private drafts = new Map<string, Draft>();
+  /** сообщение бота → черновик в нём */
+  private messages = new Map<number, string>();
 
   constructor(private deps: { db: Db; fetchRate: RateFetcher; now: () => number }) {}
 
@@ -164,8 +171,54 @@ export class QuickEntry {
       calc: null,
       problem: null,
       savedOpId: null,
+      recurring: null,
     };
     this.drafts.set(d.id, d);
+    return this.render(d, 'main');
+  }
+
+  /** Черновик регулярного расхода за месяц: всё заполнено, остаётся «Записать» или «Пропустить». */
+  async startRecurring(r: Recurring, month: string): Promise<Outcome> {
+    const t = this.deps.now();
+    const d: Draft = {
+      id: crypto.randomBytes(4).toString('hex'),
+      kind: 'expense',
+      amount: r.amount,
+      currency: r.currency,
+      walletId: r.walletId,
+      categoryId: r.categoryId,
+      projectId: r.projectId,
+      day: mskDayStart(t),
+      yesterday: false,
+      note: r.name,
+      createdAt: t,
+      calc: null,
+      problem: null,
+      savedOpId: null,
+      recurring: { id: r.id, month },
+    };
+    this.drafts.set(d.id, d);
+    return this.render(d, 'main');
+  }
+
+  /** Сообщение черновика — чтобы ответ на него («22 usdt») поправил сумму. */
+  bind(draftId: string, messageId: number): void {
+    const d = this.drafts.get(draftId);
+    if (d) this.messages.set(messageId, draftId);
+  }
+
+  /**
+   * Ответ на черновик: новая сумма (и валюта, если названа). null — это не
+   * ответ на черновик или в нём нет суммы: тогда строка — новая запись.
+   */
+  async amend(messageId: number, text: string): Promise<Outcome | null> {
+    const draftId = this.messages.get(messageId);
+    const d = draftId ? this.drafts.get(draftId) : undefined;
+    if (!d || d.savedOpId !== null || this.deps.now() - d.createdAt > TTL_MS) return null;
+    const parsed = parseQuick(text);
+    if (!parsed) return null;
+    d.amount = parsed.amount;
+    if (parsed.currency) d.currency = parsed.currency;
     return this.render(d, 'main');
   }
 
@@ -213,6 +266,17 @@ export class QuickEntry {
       case 'x':
         this.drafts.delete(d.id);
         return { text: 'Отменено — ничего не записано.', answer: 'Отменено' };
+      case 's': {
+        if (!d.recurring) return { answer: 'Кнопка устарела' };
+        try {
+          skipRecurring(db, d.recurring.id, d.recurring.month, true, this.deps.now());
+        } catch (err) {
+          if (err instanceof MoneyInputError) return { answer: err.message, alert: true };
+          throw err;
+        }
+        this.drafts.delete(d.id);
+        return { text: `⏭ Пропущено в ${monthIn(d.recurring.month)}: ${esc(d.note)}`, answer: 'Пропущено' };
+      }
       case 'ok':
         return this.save(d);
       default:
@@ -279,6 +343,7 @@ export class QuickEntry {
       date: `${ddmm(mskIso(at))}, ${d.yesterday ? 'вчера' : 'сегодня'}`,
       note: d.note,
     });
+    if (d.recurring) text = `🔁 <b>Регулярный расход</b> · ${monthName(d.recurring.month)}\n${text}\n\n<i>Сумма в этот раз другая — ответьте на это сообщение, например «22 usdt».</i>`;
     if (d.problem) text += `\n\n⚠️ ${esc(d.problem)}`;
 
     const choose = (items: { id: number; label: string; on: boolean }[], action: string): Keyboard => {
@@ -300,13 +365,17 @@ export class QuickEntry {
     } else if (view === 'wallet') {
       keyboard = choose(wallets.filter((w) => !w.archived).map((w) => ({ id: w.id, label: `${w.name} · ${w.currency}`, on: w.id === d.walletId })), 'w');
     } else {
-      keyboard = [
+      keyboard = d.recurring ? [
+        [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: '⏭ Пропустить в этом месяце', callback_data: cb(d.id, 's') }],
+        [{ text: 'Вид', callback_data: cb(d.id, 'c') }, { text: 'Проект', callback_data: cb(d.id, 'p') }, { text: 'Кошелёк', callback_data: cb(d.id, 'w') }],
+        [{ text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }],
+      ] : [
         [{ text: '✅ Записать', callback_data: cb(d.id, 'ok') }, { text: 'Расход ⇄ Доход', callback_data: cb(d.id, 'k') }],
         [{ text: 'Вид', callback_data: cb(d.id, 'c') }, { text: 'Проект', callback_data: cb(d.id, 'p') }, { text: 'Кошелёк', callback_data: cb(d.id, 'w') }],
         [{ text: d.yesterday ? 'Сегодня' : 'Вчера', callback_data: cb(d.id, 'd') }, { text: 'Отмена', callback_data: cb(d.id, 'x') }],
       ];
     }
-    return { text, keyboard };
+    return { text, keyboard, draftId: d.id };
   }
 
   /** Записывается то, что владелец видел в черновике: те же сумма и курс. */
@@ -326,7 +395,11 @@ export class QuickEntry {
     let id: number;
     try {
       // Доход из бота — перевод на кошелёк, а не приём платёжки: комиссии нет.
-      id = d.kind === 'income' ? addIncome(db, { ...base, feePct: 0 }, now()) : addExpense(db, base, now());
+      id = d.recurring
+        ? payRecurring(db, d.recurring.id, d.recurring.month, { walletId: d.walletId, amount: d.calc.walletAmount, rate: d.calc.rate, at: atOf(d) }, now())
+        : d.kind === 'income' ? addIncome(db, { ...base, feePct: 0 }, now()) : addExpense(db, base, now());
+      // вид и проект, поправленные в черновике, — у этой записи
+      if (d.recurring) db.prepare('UPDATE operations SET category_id = ?, project_id = ? WHERE id = ?').run(d.categoryId, d.projectId, id);
     } catch (err) {
       if (err instanceof MoneyInputError) return { answer: err.message, alert: true };
       throw err;
@@ -340,7 +413,7 @@ export class QuickEntry {
     const { db } = this.deps;
     const op = db.prepare('SELECT source FROM operations WHERE id = ?').get(opId) as { source: string } | undefined;
     if (!op) return { answer: 'Операции уже нет' };
-    if (op.source !== SOURCE) return { answer: 'Это не запись бота — удалите её на странице', alert: true };
+    if (op.source !== SOURCE && op.source !== RECURRING_SOURCE) return { answer: 'Это не запись бота — удалите её на странице', alert: true };
     const card = opCard(db, opId)!;
     deleteOperation(db, opId);
     return { text: `↩️ Отменено — операция удалена\n${cardText(card)}`, answer: 'Удалено' };

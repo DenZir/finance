@@ -23,6 +23,8 @@ export interface TgMessage {
   chat: TgChat;
   from?: TgUser;
   text?: string;
+  /** ответ на сообщение бота — так правят сумму черновика */
+  reply_to_message?: { message_id: number };
 }
 
 export interface TgCallbackQuery {

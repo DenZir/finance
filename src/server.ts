@@ -19,6 +19,7 @@ import {
 import { currentRate, type RateFetcher } from './rates.js';
 import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
 import { listUnsorted, resolveVpn } from './vpn.js';
+import { createRecurring, deleteRecurring, listRecurring, payRecurring, skipRecurring, updateRecurring } from './recurring.js';
 import { partnerCheck, partnerCounted, partnerWallet } from './partner.js';
 import { createWelcome, deleteFix, deleteWelcome, fixWelcome, listWelcome, payFix, updateWelcome, welcomeDebts } from './welcome.js';
 
@@ -292,6 +293,51 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
 
   app.post('/api/ad-deals/:ref/waiting', (req, res) => {
     setWaiting(db, String(req.params.ref), req.body?.on !== false, now());
+    res.json({ ok: true });
+  });
+
+  // --- регулярные расходы ---------------------------------------------------------------
+  // Месяц и сегодня — по Москве, как всё остальное.
+  const mskToday = () => new Date(now() + 3 * 3600_000).toISOString().slice(0, 10);
+  app.get('/api/recurring', async (req, res, next) => {
+    try {
+      const month = String(req.query.month ?? mskToday().slice(0, 7));
+      const list = listRecurring(db, month, mskToday());
+      const items = [];
+      for (const r of list) {
+        const rate = r.currency === 'RUB' ? 1 : await currentRate(db, r.currency, fetchRate, now());
+        items.push({ ...r, rubEstimate: rate === null ? null : Math.round(r.amount * rate) });
+      }
+      res.json(items);
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.post('/api/recurring', (req, res) => {
+    res.json({ id: createRecurring(db, req.body ?? {}, now()) });
+  });
+  app.patch('/api/recurring/:id', (req, res) => {
+    updateRecurring(db, reqId(req.params.id, 'регулярный расход'), req.body ?? {});
+    res.json({ ok: true });
+  });
+  app.delete('/api/recurring/:id', (req, res) => {
+    deleteRecurring(db, reqId(req.params.id, 'регулярный расход'));
+    res.json({ ok: true });
+  });
+  app.post('/api/recurring/:id/pay', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
+      const id = payRecurring(db, reqId(req.params.id, 'регулярный расход'), String(b.month ?? ''), {
+        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+      }, now());
+      res.json({ id });
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.post('/api/recurring/:id/skip', (req, res) => {
+    skipRecurring(db, reqId(req.params.id, 'регулярный расход'), String(req.body?.month ?? ''), req.body?.on !== false, now());
     res.json({ ok: true });
   });
 

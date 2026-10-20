@@ -102,6 +102,7 @@ if (config.botPolling || reminderHour !== null) {
     // так что перезапуск после этого часа второго напоминания не шлёт.
     setInterval(() => {
       bot.remind(reminderHour).catch((err) => console.warn('[bot] напоминание о долгах не вышло:', err instanceof Error ? err.message : err));
+      bot.recurring(reminderHour).catch((err) => console.warn('[bot] регулярные расходы не разосланы:', err instanceof Error ? err.message : err));
     }, 60_000);
     console.log(`[bot] напоминание о долгах рекламы — в ${reminderHour}:00 МСК`);
   }

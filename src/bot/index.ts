@@ -15,6 +15,8 @@ import { QuickEntry, type Outcome } from './draft.js';
 import { balanceText } from './balance.js';
 import { debtsText, lastReminderDay, markReminderDay, reminderDue } from './debts.js';
 import { welcomeDebts } from '../welcome.js';
+import { dueForNotice, listRecurring, markNoticed, type Recurring } from '../recurring.js';
+import { regularText } from './regular.js';
 import { amount, esc, mskDayStart, mskIso, rub } from './text.js';
 import { partnerCheck, partnerCounted, partnerWallet } from '../partner.js';
 import { currentRate } from '../rates.js';
@@ -45,6 +47,9 @@ export const HELP = [
   '/balance — остатки кошельков',
   '/debts — кто кому должен: реклама и приветка',
   '/partner 125 — сколько сейчас на счёте партнёрки, $: прирост станет доходом',
+  '/regular — регулярные расходы этого месяца; кому пора — пришлю черновики',
+  '',
+  'Сумма в черновике другая — ответьте на него новой суммой, например «22 usdt».',
 ].join('\n');
 
 const NO_AMOUNT = `Не нашёл сумму. Например: «${EXAMPLES[0]}» или «${EXAMPLES[3]}».\n/help — подробнее`;
@@ -64,6 +69,17 @@ export function createBot(deps: BotDeps) {
       case 'partner':
         await send(chatId, await partnerReply(args));
         return;
+      case 'regular': {
+        const month = mskIso(now()).slice(0, 7);
+        const list = listRecurring(db, month, mskIso(now())).filter((r) => r.active);
+        if (!list.length) {
+          await send(chatId, 'Регулярных расходов нет — заведите их на странице «Деньги».', openPage);
+          return;
+        }
+        await send(chatId, regularText(list, month));
+        for (const r of list.filter((x) => x.state === 'due')) await sendRecurring(chatId, r, month);
+        return;
+      }
       case 'start':
       case 'help':
         await send(chatId, HELP);
@@ -101,13 +117,28 @@ export function createBot(deps: BotDeps) {
     }
   }
 
+  async function sendRecurring(chatId: number | string, r: Recurring, month: string): Promise<void> {
+    const out = await quick.startRecurring(r, month);
+    const sent = await api.sendMessage(chatId, out.text!, out.keyboard);
+    if (out.draftId) quick.bind(out.draftId, sent.message_id);
+  }
+
   async function onMessage(msg: TgMessage): Promise<void> {
     if (msg.chat.type !== 'private' || !isOwner(msg.from?.id) || typeof msg.text !== 'string') return;
     const text = msg.text.trim();
     const m = /^\/([a-z_]+)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text);
     if (m) return command(msg.chat.id, m[1]!.toLowerCase(), (m[2] ?? '').trim());
+    // ответ на черновик с суммой — правка его суммы, а не новая запись
+    if (msg.reply_to_message) {
+      const amended = await quick.amend(msg.reply_to_message.message_id, text);
+      if (amended?.text !== undefined) {
+        await api.editMessageText(msg.chat.id, msg.reply_to_message.message_id, amended.text, amended.keyboard);
+        return;
+      }
+    }
     const out = await quick.start(text);
-    await send(msg.chat.id, out?.text ?? NO_AMOUNT, out?.keyboard);
+    const sent = await send(msg.chat.id, out?.text ?? NO_AMOUNT, out?.keyboard);
+    if (out?.draftId) quick.bind(out.draftId, sent.message_id);
   }
 
   async function onCallback(q: TgCallbackQuery): Promise<void> {
@@ -141,6 +172,29 @@ export function createBot(deps: BotDeps) {
      * Напоминание о долгах рекламы — раз в день, в hour по Москве. Зовётся раз в
      * минуту; true — напоминание отправлено.
      */
+    /**
+     * Регулярные расходы: в их день, с часа напоминаний, — черновик каждому
+     * владельцу. Отметка «отправлено» — до отправки: сбой сети не даст дубля
+     * через минуту, а страница всё равно покажет, что расход ждёт.
+     */
+    async recurring(hour: number): Promise<number> {
+      const t = now();
+      if (t - mskDayStart(t) < hour * 3600_000) return 0;
+      const today = mskIso(t);
+      const due = dueForNotice(db, today);
+      for (const r of due) {
+        markNoticed(db, r.id, today.slice(0, 7));
+        for (const owner of deps.ownerIds) {
+          try {
+            await sendRecurring(owner, r, today.slice(0, 7));
+          } catch (err) {
+            console.warn(`[bot] черновик регулярного «${r.name}» не ушёл ${owner}: ${describe(err)}`);
+          }
+        }
+      }
+      return due.length;
+    },
+
     async remind(hour: number): Promise<boolean> {
       const t = now();
       if (!reminderDue(t, hour, lastReminderDay(db))) return false;

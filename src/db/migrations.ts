@@ -241,4 +241,33 @@ export const MIGRATIONS: readonly string[] = [
   CREATE UNIQUE INDEX categories_code ON categories(code) WHERE code IS NOT NULL;
   CREATE UNIQUE INDEX projects_code ON projects(code) WHERE code IS NOT NULL;
   `,
+  `
+  -- Регулярные расходы (recurring.ts): в свой день бот присылает черновик, и
+  -- расход записывается по «Записать».
+  CREATE TABLE recurring (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    amount      INTEGER NOT NULL,              -- микро в валюте currency
+    currency    TEXT    NOT NULL,
+    wallet_id   INTEGER NOT NULL REFERENCES wallets(id),
+    category_id INTEGER REFERENCES categories(id),
+    project_id  INTEGER REFERENCES projects(id),
+    day         INTEGER NOT NULL,              -- какого числа, 1–31
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL
+  );
+  -- «Пропустить в этом месяце».
+  CREATE TABLE recurring_skips (
+    recurring_id INTEGER NOT NULL REFERENCES recurring(id),
+    month        TEXT    NOT NULL,             -- ГГГГ-ММ
+    at           INTEGER NOT NULL,
+    PRIMARY KEY (recurring_id, month)
+  );
+  -- Черновик за месяц уже отправлен ботом — второй раз не шлём.
+  CREATE TABLE recurring_notices (
+    recurring_id INTEGER NOT NULL REFERENCES recurring(id),
+    month        TEXT    NOT NULL,
+    PRIMARY KEY (recurring_id, month)
+  );
+  `,
 ];

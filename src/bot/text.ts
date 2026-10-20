@@ -33,3 +33,10 @@ export const mskIso = (ms: number) => new Date(ms + MSK).toISOString().slice(0, 
 
 /** ГГГГ-ММ-ДД → ДД.ММ */
 export const ddmm = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+
+const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+const MONTHS_IN = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'];
+/** «2026-10» → «октябрь» */
+export const monthName = (month: string) => MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
+/** «2026-10» → «октябре» — «пропущено в октябре» */
+export const monthIn = (month: string) => MONTHS_IN[Number(month.slice(5, 7)) - 1] ?? month;

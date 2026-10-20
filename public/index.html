@@ -35,6 +35,7 @@
       <button class="nav-it" type="button" data-scr="welcome"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="lbl">Приветка</span><span class="nbadge" data-nb="welcome" hidden></span></button>
       <button class="nav-it" type="button" data-scr="recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11a7 7 0 0 1 12-5l2 2"/><path d="M18 4v4h-4"/><path d="M20 13a7 7 0 0 1-12 5l-2-2"/><path d="M6 20v-4h4"/></svg><span class="lbl">Регулярные</span><span class="nbadge" data-nb="recurring" hidden></span></button>
       <button class="nav-it" type="button" data-scr="vpn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2 2 4-4"/></svg><span class="lbl">VPN — разобрать</span><span class="nbadge" data-nb="vpn" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="partner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.2 3.3-5 6.5-5s5.8 1.8 6.5 5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M17.8 15.3c2 .7 3.3 2.2 3.7 4.7"/></svg><span class="lbl">Партнёр</span></button>
       <button class="nav-it" type="button" data-scr="wallets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M15.5 13.5h2"/></svg><span class="lbl">Кошельки</span></button>
       <button class="nav-it" type="button" data-scr="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11M9.3 19V6M14.6 19v-9M20 19V4"/></svg><span class="lbl">Итоги</span></button>
       <button class="nav-it" type="button" data-scr="ops"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span class="lbl">Операции</span></button>
@@ -149,6 +150,9 @@
           </div>
         </article>
       </section>
+      <section class="screen" id="scr-partner">
+        <div id="partner"></div>
+      </section>
       <section class="screen" id="scr-wallets">
         <article class="card" id="walletsCard">
           <div class="card-h"><span class="card-idx">01 / кошельки</span><div class="card-tt"><h2 class="card-t">Кошельки и кабинеты</h2><div class="card-s">Остаток — сумма операций; в рублях — по текущему курсу</div></div><div class="right"><button class="btn btn-primary" id="addWallet" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Кошелёк</button></div></div>
@@ -186,6 +190,7 @@
     <nav class="more-nav" aria-label="Другие разделы">
       <button class="nav-it" type="button" data-scr="welcome"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="lbl">Приветка</span><span class="nbadge" data-nb="welcome" hidden></span></button>
       <button class="nav-it" type="button" data-scr="vpn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2 2 4-4"/></svg><span class="lbl">VPN — разобрать</span><span class="nbadge" data-nb="vpn" hidden></span></button>
+      <button class="nav-it" type="button" data-scr="partner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.2 3.3-5 6.5-5s5.8 1.8 6.5 5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M17.8 15.3c2 .7 3.3 2.2 3.7 4.7"/></svg><span class="lbl">Партнёр</span></button>
       <button class="nav-it" type="button" data-scr="wallets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M15.5 13.5h2"/></svg><span class="lbl">Кошельки</span></button>
       <button class="nav-it" type="button" data-scr="report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11M9.3 19V6M14.6 19v-9M20 19V4"/></svg><span class="lbl">Итоги</span></button>
       <button class="nav-it" type="button" data-catalog><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="lbl">Виды и проекты</span></button>
@@ -202,6 +207,7 @@
       <button type="button" data-kind="expense">Расход</button>
       <button type="button" data-kind="transfer">Перевод</button>
       <button type="button" data-kind="payout">Партнёру</button>
+      <button type="button" data-kind="payin">От партнёра</button>
       <button type="button" data-kind="adjust">Остаток</button>
     </div>
     <div id="opFields" class="fields"></div>
@@ -286,7 +292,8 @@
       <label class="wide">Что<input name="name" required maxlength="100" placeholder="Сервер Aeza, ChatGPT…"></label>
       <label>Сумма<input name="amount" inputmode="decimal" required placeholder="20"></label>
       <label>Валюта суммы<input name="currency" maxlength="6" autocapitalize="characters" placeholder="как у кошелька"></label>
-      <label>С какого кошелька<select name="walletId"></select></label>
+      <label>Кто платит<select name="paidBy"><option value="me">Я — с кошелька</option><option value="partner">Партнёр — своими</option></select></label>
+      <label data-rec-wallet>С какого кошелька<select name="walletId"></select></label>
       <label>Какого числа<input name="day" inputmode="numeric" required placeholder="5"></label>
       <label>Вид расхода<select name="categoryId"></select></label>
       <label>Проект<select name="projectId"></select></label>

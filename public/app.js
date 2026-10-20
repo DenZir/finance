@@ -6,7 +6,7 @@ const $ = (s) => document.querySelector(s);
 const MICRO = 1e6;
 const MSK = 3 * 3600e3;
 const KIND_LABEL = { provider: 'платёжка', crypto: 'крипта', card: 'карта', cash: 'наличные' };
-const OP_LABEL = { income: 'Доход', expense: 'Расход', transfer: 'Перевод', payout: 'Партнёру', adjust: 'Остаток' };
+const OP_LABEL = { income: 'Доход', expense: 'Расход', transfer: 'Перевод', payout: 'Партнёру', payin: 'От партнёра', adjust: 'Остаток' };
 
 let S = null; // state
 let month = monthOf(Date.now());
@@ -27,6 +27,7 @@ let fixDealId = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
 let vpnRows = []; // оплаты VPN без платёжки
 let vpnPicked = new Set();
+let partnerRows = []; // расчёт с партнёром по проектам (VPN)
 
 function monthOf(ms) {
   const d = new Date(ms + MSK);
@@ -115,11 +116,12 @@ const SCREENS = {
   welcome: ['Приветка', 'Чужие ссылки в приветке и оплата за заявки'],
   recurring: ['Регулярные расходы', 'Серверы и подписки: в свой день бот присылает черновик'],
   vpn: ['VPN — разобрать', 'Оплаты VPN, по которым бот не сказал платёжку'],
+  partner: ['Партнёр', 'Кто сколько оплатил по проекту с партнёром и кто кому докидывает'],
   wallets: ['Кошельки', 'Платёжки, кабинеты VPN, крипта и карты'],
   report: ['Итоги', 'Доходы, комиссии и расходы по видам — за месяц или год'],
   ops: ['Операции', 'Всё, что записано: руками, ботом и импортом'],
 };
-const IN_MORE = ['welcome', 'vpn', 'wallets', 'report']; // на телефоне — в «Ещё»
+const IN_MORE = ['welcome', 'vpn', 'partner', 'wallets', 'report']; // на телефоне — в «Ещё»
 let screen = 'overview';
 const screenOfHash = () => (SCREENS[location.hash.slice(1)] ? location.hash.slice(1) : 'overview');
 
@@ -218,9 +220,9 @@ function renderTiles(report) {
     { lbl: 'На кошельках', icon: IC.wallet, c: C.violet, val: rub(S.totals.onWallets), delta: '<span class="delta flat">выведено</span>',
       sub: `кошельков: ${count((w) => w.kind !== 'provider')}`, bar: share(S.totals.onWallets) },
     vpn
-      ? { lbl: `Должен партнёру · ${esc(vpn.name)}`, icon: IC.users, c: C.amber, val: rub(Math.max(vpn.owed, 0)), cls: vpn.owed > 0 ? 'warn' : '',
+      ? { lbl: `Должен партнёру · ${esc(vpn.name)}`, icon: IC.users, c: C.amber, val: rub(Math.max(vpn.owed, 0)), cls: vpn.owed > 0 ? 'warn' : '', scr: 'partner',
           delta: vpn.owed < 0 ? '<span class="delta up">вам должны</span>' : `<span class="delta flat">${vpn.pct}%</span>`,
-          sub: vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода за вычетом комиссий и расходов` }
+          sub: vpn.owed < 0 ? `партнёр должен вам ${rub(-vpn.owed)}` : `${vpn.pct}% дохода и расходов — расчёт в «Партнёре»` }
       : { lbl: 'Должен партнёру', icon: IC.users, c: C.amber, val: '—', delta: '', sub: 'нет проектов с партнёром' },
     { lbl: period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', icon: IC.rub, c: report.net >= 0 ? C.green : C.red, val: rub(report.net), cls: report.net >= 0 ? 'good' : 'bad',
       delta: report.totalIncome ? `<span class="delta ${report.net >= 0 ? 'up' : 'dn'}">${Math.round((report.net / report.totalIncome) * 100)}% дохода</span>` : '<span class="delta flat">нет дохода</span>',
@@ -233,7 +235,7 @@ function renderTiles(report) {
       sub: S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны' },
   ];
   $('#tiles').innerHTML = tiles
-    .map((k) => `<article class="card kpi">
+    .map((k) => `<article class="card kpi"${k.scr ? ` data-scr="${k.scr}" title="Открыть раздел"` : ''}>
       <div class="kpi-top"><span class="kpi-ic" style="${hueBox(k.c)}">${k.icon}</span><span class="kpi-lbl">${k.lbl}</span>${k.delta}</div>
       <div class="kpi-val ${k.cls ?? ''}">${k.val}</div>
       <div class="kpi-sub">${k.sub}</div>
@@ -698,6 +700,70 @@ function openPartner() {
   f.balance.focus();
 }
 
+// --- партнёр: расчёт по проекту с партнёром -------------------------------------------
+// Долг = его доля дохода − его доля всех расходов + что он оплатил сам − что ему
+// докинули + что он докинул (ledger.ts, owedFrom). Здесь — та же сумма по частям.
+const ym = (m) => `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`;
+function renderPartner() {
+  if (!partnerRows.length) {
+    $('#partner').innerHTML = '<article class="card"><div class="empty" style="padding-top:18px">Проектов с партнёром нет — его долю задают в ⚙ «Виды и проекты».</div></article>';
+    return;
+  }
+  const line = (label, v, cls = '') => `<div class="pl-row"><span>${label}</span><b class="${cls}">${v}</b></div>`;
+  const sign = (v) => (v > 0 ? `+${rub(v)}` : v < 0 ? `−${rub(-v)}` : rub(0));
+  $('#partner').innerHTML = partnerRows
+    .map((p) => {
+      const o = p.owed;
+      const head = o > 0 ? 'Докинуть партнёру' : o < 0 ? 'Партнёр докидывает вам' : 'Расчёт сошёлся';
+      const months = [...p.months].reverse();
+      const opRow = (x) => {
+        const w = S.wallets.find((y) => y.id === x.walletId);
+        const title = x.kind === 'payout' ? 'Вы докинули партнёру' : x.kind === 'payin' ? 'Партнёр докинул вам' : `${esc(nameOf(S.categories, x.categoryId))} · платил партнёр`;
+        const sum = x.kind === 'expense' && x.paidCurrency && x.paidCurrency !== 'RUB' ? `${amt(x.paidAmount, x.paidCurrency)}<small>≈ ${rub(x.grossRub)}</small>` : rub(x.grossRub);
+        return `<div class="op"><span class="when">${day(x.at)}</span><div class="what"><b>${title}</b><small>${[w && esc(w.name), esc(x.note)].filter(Boolean).join(' · ') || OP_LABEL[x.kind]}</small></div>
+          <div class="sum"><span class="${x.kind === 'payin' ? 'plus' : 'minus'}">${sum}</span></div><button class="del" type="button" data-del="${x.id}" aria-label="Удалить операцию">×</button></div>`;
+      };
+      return `<article class="card hero">
+        <div class="card-h"><span class="card-idx">01 / расчёт</span><div class="card-tt"><h2 class="card-t">${esc(p.name)} · партнёру ${p.pct}%</h2><div class="card-s">Его доля — ${p.pct}% дохода после комиссий и ${p.pct}% всех расходов, кто бы их ни оплатил</div></div>
+          <div class="right"><button class="btn" type="button" data-pexp="${p.projectId}">+ Расход партнёра</button></div></div>
+        <div class="pl-grid">
+          <div class="pl-total"><span class="kpi-lbl">${head}</span><b class="${o > 0 ? 'warn' : o < 0 ? 'good' : ''}">${rub(Math.abs(o))}</b>
+            <small>${o > 0 ? 'столько вы должны ему на сегодня' : o < 0 ? 'столько он должен вам на сегодня' : 'никто никому не должен'}</small>
+            <div class="pl-acts">
+              <button class="btn ${o > 0 ? 'btn-primary' : ''}" type="button" data-psettle="payout" data-project="${p.projectId}" data-amount="${o > 0 ? o : ''}">Докинуть партнёру</button>
+              <button class="btn ${o < 0 ? 'btn-primary' : ''}" type="button" data-psettle="payin" data-project="${p.projectId}" data-amount="${o < 0 ? -o : ''}">Партнёр докинул</button>
+            </div>
+          </div>
+          <div>
+            ${line('Доход после комиссий', rub(p.income))}
+            ${line(`Его доля дохода · ${p.pct}%`, sign(p.incomeShare), 'plus')}
+            ${line('Расходы — платили вы', rub(p.expenseOwner))}
+            ${line('Расходы — платил партнёр', rub(p.expensePartner))}
+            ${line(`Его доля расходов · ${p.pct}%`, sign(-p.expenseShare), 'minus')}
+            ${line('Вернуть ему его расходы', sign(p.expensePartner), 'plus')}
+            ${line('Вы докинули ему', sign(-p.paidOut), 'minus')}
+            ${line('Он докинул вам', sign(p.paidIn), 'plus')}
+            <div class="pl-row total"><span>${o >= 0 ? 'Вы должны партнёру' : 'Партнёр должен вам'}</span><b class="${o > 0 ? 'minus' : o < 0 ? 'plus' : ''}">${rub(Math.abs(o))}</b></div>
+          </div>
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-h"><span class="card-idx">02 / по месяцам</span><div class="card-tt"><h2 class="card-t">Как набегало</h2><div class="card-s">«Набежало» — его доля дохода − его доля расходов + его расходы; «долг» — ваш ему на конец месяца, с выплатами</div></div></div>
+        ${months.length ? `<div class="scroll-x"><table>
+          <thead><tr><th>Месяц</th><th class="num">Доход</th><th class="num">Платили вы</th><th class="num">Платил он</th><th class="num">Набежало</th><th class="num">Выплаты</th><th class="num">Долг</th></tr></thead>
+          <tbody>${months.map((m) => `<tr><td>${ym(m.month)}</td><td class="num">${rub(m.income)}</td><td class="num">${rub(m.expenseOwner)}</td><td class="num">${rub(m.expensePartner)}</td>
+            <td class="num">${sign(m.accrued)}</td><td class="num">${m.paidOut || m.paidIn ? sign(m.paidIn - m.paidOut) : '—'}</td>
+            <td class="num ${m.owed > 0 ? 'minus' : m.owed < 0 ? 'plus' : ''}">${m.owed >= 0 ? rub(m.owed) : `он вам ${rub(-m.owed)}`}</td></tr>`).join('')}</tbody>
+        </table></div>` : '<div class="empty">Операций по проекту ещё нет.</div>'}
+      </article>
+      <article class="card">
+        <div class="card-h"><span class="card-idx">03 / операции</span><div class="card-tt"><h2 class="card-t">Его расходы и выплаты</h2><div class="card-s">Расходы, которые оплатил партнёр, и деньги туда и обратно</div></div></div>
+        ${p.ops.length ? p.ops.map(opRow).join('') : '<div class="empty">Пока ничего — партнёр ничего не оплачивал, выплат не было.</div>'}
+      </article>`;
+    })
+    .join('');
+}
+
 // --- регулярные расходы ------------------------------------------------------------
 // месяц блока — выбранный; в режиме «Год» — текущий
 const recMonth = () => (period === 'year' ? todayIso().slice(0, 7) : month);
@@ -726,7 +792,7 @@ function renderRecurring() {
       else if (r.state === 'skipped') acts = `<span class="chip">пропущен</span><button class="btn ghost" type="button" data-rskip="${id}" data-on="0">Вернуть</button>`;
       else if (r.state === 'due') acts = `<button class="btn btn-primary" type="button" data-rpay="${id}">Записать</button><button class="btn" type="button" data-rskip="${id}" data-on="1">Пропустить</button>`;
       else acts = `<span class="chip">будет ${day(Date.parse(`${r.dueDate}T09:00:00Z`))}</span><button class="btn ghost" type="button" data-rpay="${id}" title="Записать заранее">Записать</button>`;
-      const sub = [nameOrDash(S.categories, r.categoryId), nameOrDash(S.projects, r.projectId), nameOrDash(S.wallets, r.walletId)].filter(Boolean).map(esc).join(' · ');
+      const sub = [nameOrDash(S.categories, r.categoryId), nameOrDash(S.projects, r.projectId), r.paidBy === 'partner' ? 'платит партнёр' : nameOrDash(S.wallets, r.walletId)].filter(Boolean).map(esc).join(' · ');
       return `<div class="deal${!r.active || r.state === 'paid' || r.state === 'skipped' ? ' done' : ''}"><span class="when">${String(r.day).padStart(2, '0')} числа</span>
         <div class="what"><b>${esc(r.name)}</b><small>${sub}${r.state === 'due' && r.active ? ` · <span class="age">ждёт с ${day(Date.parse(`${r.dueDate}T09:00:00Z`))}</span>` : ''}</small></div>
         <div class="sum">${sumTxt}</div><div class="acts">${acts}<button class="btn ghost" type="button" data-redit="${id}" aria-label="Изменить">✎</button></div></div>`;
@@ -752,15 +818,41 @@ function openRecurring(r) {
   f.day.value = r?.day ?? '';
   f.categoryId.value = r?.categoryId ?? '';
   f.projectId.value = r?.projectId ?? '';
+  f.paidBy.value = r?.paidBy === 'partner' ? 'partner' : 'me';
+  syncRecPayer();
   f.active.checked = r ? r.active : true;
   f.querySelector('[data-active]').hidden = !r;
   $('#recurringDel').hidden = !r;
   $('#recurringDlg').showModal();
 }
 
+// платит партнёр — кошелёк не нужен, а в проект годится только проект с партнёром
+function syncRecPayer() {
+  const f = $('#recurringForm');
+  const partner = f.paidBy.value === 'partner';
+  f.querySelector('[data-rec-wallet]').hidden = partner;
+  f.walletId.disabled = partner;
+  f.currency.placeholder = partner ? 'RUB' : S.wallets.find((w) => String(w.id) === f.walletId.value)?.currency ?? '';
+}
+
 function payRecurringRow(id) {
   const r = recurringRows.find((x) => x.id === id);
   if (!r) return;
+  if (r.paidBy === 'partner') {
+    showPay({
+      title: 'Регулярный расход партнёра',
+      desc: `${r.name} · ${amt(r.amount, r.currency)} за ${$('#recurringTitle').textContent.split('· ')[1]} · платит партнёр`,
+      amount: r.rubEstimate,
+      native: { amount: r.amount, currency: r.currency },
+      noWallet: true,
+      currency: r.currency,
+      amountLabel: `Сколько заплатил партнёр, ${r.currency}`,
+      hint: 'Ваши кошельки не трогает: вы останетесь должны партнёру эту сумму за вычетом его доли.',
+      url: `/api/recurring/${id}/pay`,
+      extra: { month: recMonth() },
+    });
+    return;
+  }
   showPay({
     title: 'Регулярный расход',
     desc: `${r.name} · ${amt(r.amount, r.currency)} за ${$('#recurringTitle').textContent.split('· ')[1]}`,
@@ -859,6 +951,9 @@ function showPay(target) {
   $('#payTitle').textContent = target.title;
   $('#payDeal').textContent = target.desc;
   f.walletId.innerHTML = (target.wallets ?? adWallets()).map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
+  // платит партнёр — кошелька нет, и в запрос он не уходит
+  f.walletId.closest('label').hidden = !!target.noWallet;
+  f.walletId.disabled = !!target.noWallet;
   if (target.walletId) f.walletId.value = String(target.walletId);
   f.date.value = target.date ?? todayIso();
   $('#payAmountLabel').firstChild.textContent = target.amountLabel;
@@ -878,6 +973,11 @@ const adWallets = () =>
 // сумма сделки — в рублях; на кошелёк в другой валюте подставляем по курсу
 function syncPay() {
   const f = $('#payForm');
+  if (payTarget?.noWallet) {
+    f.querySelector('[data-pay-rate]').hidden = payTarget.currency === 'RUB';
+    if (payTarget.native) f.amount.value = String(payTarget.native.amount / MICRO).replace('.', ',');
+    return;
+  }
   const amount = payTarget?.amount;
   const w = S.wallets.find((x) => String(x.id) === f.walletId.value);
   f.querySelector('[data-pay-rate]').hidden = !w || w.currency === 'RUB';
@@ -958,11 +1058,14 @@ function opLine(o) {
     sub = o.feeRub ? `потеря ${rub(o.feeRub)}` : '';
   } else {
     const wallet = a && w(a.walletId);
-    title = o.kind === 'payout' ? `Выплата партнёру · ${esc(nameOf(S.projects, o.projectId))}` : esc(nameOf(S.categories, o.categoryId));
-    sum = `<span class="${o.kind === 'income' ? 'plus' : 'minus'}">${o.kind === 'income' ? '+' : '−'}${rub(o.grossRub)}</span>`;
-    sub = [wallet && esc(wallet.name), o.kind === 'income' && o.feeRub ? `комиссия ${rub(o.feeRub)}` : '', wallet && wallet.currency !== 'RUB' && a ? amt(Math.abs(a.amount), wallet.currency) : ''].filter(Boolean).join(' · ');
+    const plus = o.kind === 'income' || o.kind === 'payin';
+    title = o.kind === 'payout' ? `Выплата партнёру · ${esc(nameOf(S.projects, o.projectId))}` : o.kind === 'payin' ? `От партнёра · ${esc(nameOf(S.projects, o.projectId))}` : esc(nameOf(S.categories, o.categoryId));
+    sum = `<span class="${plus ? 'plus' : 'minus'}">${plus ? '+' : '−'}${rub(o.grossRub)}</span>`;
+    sub = o.paidBy === 'partner'
+      ? ['платил партнёр', o.paidCurrency && o.paidCurrency !== 'RUB' ? amt(o.paidAmount, o.paidCurrency) : ''].filter(Boolean).join(' · ')
+      : [wallet && esc(wallet.name), o.kind === 'income' && o.feeRub ? `комиссия ${rub(o.feeRub)}` : '', wallet && wallet.currency !== 'RUB' && a ? amt(Math.abs(a.amount), wallet.currency) : ''].filter(Boolean).join(' · ');
   }
-  const meta = [OP_LABEL[o.kind], o.projectId && o.kind !== 'payout' ? esc(nameOf(S.projects, o.projectId)) : '', esc(o.note), o.source === 'botprivat' ? 'авто · ботприват' : o.source === 'ads' ? 'сделка рекламы' : o.source === 'vpn' ? 'авто · VPN' : ''].filter(Boolean).join(' · ');
+  const meta = [OP_LABEL[o.kind], o.projectId && o.kind !== 'payout' && o.kind !== 'payin' ? esc(nameOf(S.projects, o.projectId)) : '', esc(o.note), o.source === 'botprivat' ? 'авто · ботприват' : o.source === 'ads' ? 'сделка рекламы' : o.source === 'vpn' ? 'авто · VPN' : ''].filter(Boolean).join(' · ');
   return `<div class="op"><span class="when">${day(o.at)}</span><div class="what"><b>${title}</b><small>${meta}</small></div><div class="sum">${sum}<small>${sub}</small></div><button class="del" type="button" data-del="${o.id}" aria-label="Удалить операцию">×</button></div>`;
 }
 
@@ -982,6 +1085,7 @@ async function load() {
     api(byYear ? `/api/income?year=${year}` : `/api/income?month=${month}`),
     api(`/api/recurring?month=${recMonth()}`),
   ]);
+  partnerRows = await api('/api/partner-settlement');
   $('#login').hidden = true;
   $('#app').hidden = false;
   if (location.search) history.replaceState(null, '', location.pathname + location.hash);
@@ -1006,6 +1110,7 @@ async function load() {
   renderWelcome();
   renderRecurring();
   renderVpn();
+  renderPartner();
   renderWallets();
   $('#report').innerHTML = byYear ? yearHtml(report) : reportHtml(report);
   $('#ops').innerHTML = byYear
@@ -1041,8 +1146,10 @@ function renderOpFields() {
       <label>Вид дохода<select name="categoryId">${opts(cats('income'), '—')}</select></label>
       <label>Проект<select name="projectId">${opts(S.projects, '—')}</select></label>${rate()}${note}`;
   if (opKind === 'expense')
-    html = `<label>Кошелёк<select name="walletId">${walletOpts()}</select></label>${date}
-      <label class="wide">Сумма<input name="amount" inputmode="decimal" required placeholder="20"></label>
+    html = `<label>Платил<select name="paidBy"><option value="me">Я — с кошелька</option>${S.projects.some((p) => p.partnerPct > 0) ? '<option value="partner">Партнёр — своими</option>' : ''}</select></label>
+      <label data-me>Кошелёк<select name="walletId">${walletOpts()}</select></label>
+      <label data-partner hidden>Валюта<input name="currency" maxlength="6" autocapitalize="characters" placeholder="RUB"></label>${date}
+      <label>Сумма<input name="amount" inputmode="decimal" required placeholder="20"></label>
       <label>Вид расхода<select name="categoryId">${opts(cats('expense'), '—')}</select></label>
       <label>Проект<select name="projectId">${opts(S.projects, '—')}</select></label>${rate()}${note}`;
   if (opKind === 'transfer')
@@ -1054,8 +1161,8 @@ function renderOpFields() {
   if (opKind === 'adjust')
     html = `<label>Кошелёк<select name="walletId">${walletOpts()}</select></label>${date}
       <label class="wide">Сколько на самом деле<input name="amount" inputmode="decimal" required placeholder="12 340"></label>${rate()}${note}`;
-  if (opKind === 'payout')
-    html = `<label>Кошелёк<select name="walletId">${walletOpts()}</select></label>${date}
+  if (opKind === 'payout' || opKind === 'payin')
+    html = `<label>${opKind === 'payin' ? 'На какой кошелёк' : 'С какого кошелька'}<select name="walletId">${walletOpts()}</select></label>${date}
       <label>Сумма<input name="amount" inputmode="decimal" required></label>
       <label>Проект<select name="projectId">${opts(S.projects.filter((p) => p.partnerPct > 0))}</select></label>${rate()}${note}`;
   $('#opFields').innerHTML = html;
@@ -1063,28 +1170,51 @@ function renderOpFields() {
   if (opKind === 'transfer' && transferSecond) $('#opFields [name=toWalletId]').value = transferSecond.id;
   $('#opHint').textContent = {
     income: 'На кошелёк ляжет сумма за вычетом комиссии; в отчёте — полная сумма и комиссия отдельно.',
-    expense: 'Расход проекта с партнёром уменьшит долг перед ним на его долю.',
+    expense: 'Расход проекта с партнёром делится по долям, кто бы его ни оплатил. Платил партнёр — кошелёк не нужен: впишите, сколько и в чём он заплатил, — вы останетесь должны ему это за вычетом его доли.',
     transfer: 'Впишите, сколько ушло и сколько пришло — разница в рублях станет комиссией вывода (3 %, Rapira, курс).',
-    payout: 'Выплата закрывает долг перед партнёром по проекту.',
+    payout: 'Вы докидываете партнёру — долг перед ним меньше. Не расход.',
+    payin: 'Партнёр докинул вам разницу — деньги на ваш кошелёк, его долг меньше. Не доход.',
     adjust: 'Фактический баланс по кабинету платёжки или кошелька на эту дату. Разница с насчитанным станет поправкой — она не доход и не расход. Так вносятся начальные остатки.',
   }[opKind];
   syncRates();
 }
 
-// поле курса нужно только для не-рублёвых кошельков
+// поле курса нужно только для не-рублёвых кошельков (или валюты, в которой платил партнёр)
 function syncRates() {
   const f = $('#opForm');
+  const partner = f.paidBy?.value === 'partner';
+  for (const x of f.querySelectorAll('[data-me]')) x.hidden = partner;
+  for (const x of f.querySelectorAll('[data-partner]')) x.hidden = !partner;
+  if (f.walletId) f.walletId.disabled = partner; // без кошелька — и в запрос не уходит
   const cur = (sel) => S.wallets.find((w) => String(w.id) === f.querySelector(sel)?.value)?.currency;
   for (const [field, sel] of [['rate', '[name=walletId]'], ['toRate', '[name=toWalletId]']]) {
     const label = f.querySelector(`[data-rate=${field}]`);
-    if (label) label.hidden = !cur(sel) || cur(sel) === 'RUB';
+    const c = partner && field === 'rate' ? (f.currency.value.trim().toUpperCase() || 'RUB') : cur(sel);
+    if (label) label.hidden = !c || c === 'RUB';
   }
 }
 
-function openOp() {
+// платит партнёр — только проекты с партнёром; плачу я — любые
+function syncPayer() {
+  const f = $('#opForm');
+  if (!f.paidBy) return;
+  const partner = f.paidBy.value === 'partner';
+  const keep = f.projectId.value;
+  f.projectId.innerHTML = partner ? opts(S.projects.filter((p) => p.partnerPct > 0)) : opts(S.projects, '—');
+  if ([...f.projectId.options].some((o) => o.value === keep)) f.projectId.value = keep;
+  syncRates();
+}
+
+// preset — поля, заполненные заранее: из раздела «Партнёр» окно открывается с суммой и проектом
+function openOp(kind = opKind, preset = {}) {
+  opKind = kind;
+  for (const x of $('#opKinds').children) x.classList.toggle('on', x.dataset.kind === kind);
   $('#opError').hidden = true;
   $('#opForm').reset();
   renderOpFields();
+  const f = $('#opForm');
+  for (const [k, v] of Object.entries(preset)) if (f[k]) f[k].value = v;
+  syncPayer();
   $('#opDlg').showModal();
 }
 
@@ -1095,7 +1225,10 @@ $('#opKinds').addEventListener('click', (e) => {
   for (const x of $('#opKinds').children) x.classList.toggle('on', x === b);
   renderOpFields();
 });
-$('#opFields').addEventListener('change', syncRates);
+$('#opFields').addEventListener('change', (e) => (e.target.name === 'paidBy' ? syncPayer() : syncRates()));
+$('#opFields').addEventListener('input', (e) => {
+  if (e.target.name === 'currency') syncRates();
+});
 
 $('#opForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1262,12 +1395,12 @@ $('#recurring').addEventListener('click', async (e) => {
   }
 });
 $('#recurringForm').addEventListener('change', (e) => {
-  if (e.target.name === 'walletId') e.target.form.currency.placeholder = S.wallets.find((w) => String(w.id) === e.target.value)?.currency ?? '';
+  if (e.target.name === 'walletId' || e.target.name === 'paidBy') syncRecPayer();
 });
 $('#recurringForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target));
-  const body = { name: f.name, walletId: f.walletId, amount: f.amount, currency: f.currency, day: f.day, categoryId: f.categoryId || null, projectId: f.projectId || null };
+  const body = { name: f.name, paidBy: f.paidBy, walletId: f.walletId, amount: f.amount, currency: f.currency, day: f.day, categoryId: f.categoryId || null, projectId: f.projectId || null };
   if (recurringEdit) body.active = e.target.active.checked;
   try {
     if (recurringEdit) await api(`/api/recurring/${recurringEdit.id}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -1397,6 +1530,23 @@ $('#payForm').addEventListener('submit', async (e) => {
   }
 });
 
+$('#partner').addEventListener('click', async (e) => {
+  const exp = e.target.closest('[data-pexp]');
+  if (exp) return openOp('expense', { paidBy: 'partner', projectId: exp.dataset.pexp, categoryId: S.categories.find((c) => c.code === 'vpn_infra')?.id ?? '' });
+  const settle = e.target.closest('[data-psettle]');
+  if (settle) {
+    const v = Number(settle.dataset.amount);
+    return openOp(settle.dataset.psettle, { projectId: settle.dataset.project, amount: v ? String(Math.round(v / 10_000) / 100).replace('.', ',') : '' });
+  }
+  const b = e.target.closest('[data-del]');
+  if (!b || !confirm('Удалить операцию? Расчёт с партнёром пересчитается.')) return;
+  try {
+    await api(`/api/operations/${b.dataset.del}`, { method: 'DELETE' });
+    await load();
+  } catch (err) {
+    toast(err.message);
+  }
+});
 $('#ops').addEventListener('click', async (e) => {
   if (e.target.closest('[data-period]')) return setPeriod('month');
   const b = e.target.closest('[data-del]');

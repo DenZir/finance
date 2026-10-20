@@ -54,6 +54,49 @@ async function api(path, init = {}) {
   return body;
 }
 
+// --- ссылка на сделку из tg-analytics: /#deal=sale:5 ------------------------------
+// Вход через Telegram уводит со страницы и возвращает на «/» без хвоста адреса —
+// поэтому сделку из ссылки запоминаем до входа и открываем после.
+const DEAL_LINK = /^#deal=((?:buy|sale):\d+)$/;
+function rememberDealLink() {
+  const m = DEAL_LINK.exec(location.hash);
+  if (!m) return;
+  try { sessionStorage.setItem('dealLink', m[1]); } catch { /* приватный режим — откроется без сделки */ }
+  history.replaceState(null, '', location.pathname + location.search);
+}
+function takeDealLink() {
+  try {
+    const ref = sessionStorage.getItem('dealLink');
+    sessionStorage.removeItem('dealLink');
+    return ref;
+  } catch {
+    return null;
+  }
+}
+function focusDeal(ref) {
+  const d = deals.find((x) => x.ref === ref);
+  if (!d) {
+    toast('Этой сделки в «Деньгах» ещё нет — она подтянется из аналитики в течение 5 минут');
+    return;
+  }
+  // оплаченная, бартер и отменённая видны только во «Все сделки»
+  if (!adsAll && !$(`#ads [data-deal="${CSS.escape(ref)}"]`)) {
+    adsAll = true;
+    renderAds();
+  }
+  const row = $(`#ads [data-deal="${CSS.escape(ref)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.add('hl');
+  setTimeout(() => row.classList.remove('hl'), 4000);
+}
+rememberDealLink();
+window.addEventListener('hashchange', () => {
+  rememberDealLink();
+  const ref = takeDealLink();
+  if (ref && S) focusDeal(ref);
+});
+
 // --- вход -----------------------------------------------------------------
 async function showLogin() {
   $('#app').hidden = true;
@@ -129,7 +172,7 @@ function dealLine(d, group) {
     : pickable(d)
       ? `<label class="pick"><input type="checkbox" data-pick="${ref}" data-g="${group}">${dealDay(d.date)}</label>`
       : `<span class="pick-gap"></span>${dealDay(d.date)}`;
-  return `<div class="deal${done ? ' done' : ''}"><span class="when">${when}</span>
+  return `<div class="deal${done ? ' done' : ''}" data-deal="${ref}"><span class="when">${when}</span>
     <div class="what"><b>${dealTitle(d)}</b><small>${sub}</small></div>
     <div class="sum">${sum}</div><div class="acts">${acts}</div></div>`;
 }
@@ -618,6 +661,11 @@ $('#logout').addEventListener('click', async () => {
   location.href = '/';
 });
 
-load().catch((e) => {
-  if (e.message !== 'нужно войти') toast(e.message);
-});
+load()
+  .then(() => {
+    const ref = takeDealLink();
+    if (ref) focusDeal(ref);
+  })
+  .catch((e) => {
+    if (e.message !== 'нужно войти') toast(e.message);
+  });

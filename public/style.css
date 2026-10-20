@@ -87,6 +87,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .deal .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
 .deal .acts .btn { padding: 6px 10px; }
 .deal.done { opacity: .6; }
+.deal.hl { background: rgba(87, 182, 255, .12); box-shadow: inset 3px 0 0 var(--accent); opacity: 1; transition: background .3s; }
 .chip.warn { color: var(--warn); border-color: var(--warn); }
 .ads-sum { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin: -4px 0 8px; }
 .pay-deal { margin: -4px 0 12px; font-size: 13px; }

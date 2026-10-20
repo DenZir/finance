@@ -235,22 +235,34 @@ function syncPick() {
 const PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9'];
 const MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const DOW = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
-const inc = { by: 'cat', net: false, vpn: 'all', off: new Set(), open: new Set(), allDays: false };
+// mode: income — доход; expense — расходы и потери при выводе; net — доход за вычетом
+// комиссий и расходов, по проектам (у расхода свой вид, у дохода свой — общий только проект)
+const inc = { mode: 'income', by: 'cat', net: false, vpn: 'all', off: new Set(), open: new Set(), allDays: false };
 let incChart = null;
+// потери при выводе и обмене: у перевода нет ни вида, ни проекта
+const FEES = { id: 'fees', name: 'Комиссии выводов', color: '#7d8796' };
+const incBy = () => (inc.mode === 'net' ? 'proj' : inc.by);
 
-// источники: виды дохода или проекты; без вида / без проекта — в «Прочее»
+// источники: виды или проекты; без вида / без проекта — в «Прочее» (по коду: название меняют)
 function incSources() {
-  const list = inc.by === 'cat' ? S.categories.filter((c) => c.kind === 'income') : S.projects;
-  return list.map((x, i) => ({ id: x.id, name: x.name, color: PALETTE[i % PALETTE.length] }));
+  const kind = inc.mode === 'expense' ? 'expense' : 'income';
+  const list = incBy() === 'cat' ? S.categories.filter((c) => c.kind === kind) : S.projects;
+  const sources = list.map((x, i) => ({ id: String(x.id), code: x.code, name: x.name, color: PALETTE[i % PALETTE.length] }));
+  return inc.mode === 'income' ? sources : [...sources, FEES];
 }
 
-// сумма строки с учётом переключателей: до комиссий / чистыми, VPN целиком / доля владельца
+// сумма строки с учётом переключателей: до комиссий / чистыми, VPN целиком / доля владельца.
+// В «Чистыми» расходы и потери при выводе — со знаком минус.
 function incAmount(r) {
-  let v = inc.net ? r.gross - r.fee : r.gross;
+  if (inc.mode === 'income' && r.kind !== 'income') return 0;
+  if (inc.mode === 'expense' && r.kind === 'income') return 0;
+  let v = r.kind === 'income' ? (inc.net || inc.mode === 'net' ? r.gross - r.fee : r.gross) : r.kind === 'expense' ? r.gross : r.fee;
+  if (inc.mode === 'net' && r.kind !== 'income') v = -v;
   const p = S.projects.find((x) => x.id === r.projectId);
   if (inc.vpn === 'own' && p?.partnerPct) v = (v * (100 - p.partnerPct)) / 100;
   return v;
 }
+const signed = (v) => (v > 0 ? `+${rub(v)}` : v < 0 ? `−${rub(-v)}` : rub(0));
 
 // ячейки периода: дни месяца по сегодняшний (по Москве) или месяцы года
 function incKeys() {
@@ -263,60 +275,76 @@ const incLabel = (key) => (key.length === 7 ? MON_SHORT[Number(key.slice(5)) - 1
 const incPast = (key) => key <= (key.length === 7 ? todayIso().slice(0, 7) : todayIso());
 
 function renderIncome() {
+  const net = inc.mode === 'net';
   const sources = incSources();
-  const other = sources.find((s) => s.name === 'Прочее') ?? sources[sources.length - 1];
-  const srcOf = (r) => sources.find((s) => s.id === (inc.by === 'cat' ? r.categoryId : r.projectId)) ?? other;
+  const otherCode = incBy() === 'proj' ? 'other' : inc.mode === 'expense' ? 'other_expense' : 'other_income';
+  const other = sources.find((s) => s.code === otherCode) ?? sources.filter((s) => s !== FEES).at(-1) ?? FEES;
+  const srcOf = (r) => (r.kind === 'transfer' ? FEES : sources.find((s) => s.id === String(incBy() === 'cat' ? r.categoryId : r.projectId)) ?? other);
   const keys = incKeys();
   // ячейка × источник
   const cell = new Map();
   for (const r of incomeRows) {
+    const v = incAmount(r);
+    if (!v) continue;
     const k = `${r.key}|${srcOf(r).id}`;
-    cell.set(k, (cell.get(k) ?? 0) + incAmount(r));
+    cell.set(k, (cell.get(k) ?? 0) + v);
   }
   const val = (key, s) => cell.get(`${key}|${s.id}`) ?? 0;
   const sums = new Map(sources.map((s) => [s.id, keys.reduce((t, k) => t + val(k, s), 0)]));
-  const present = sources.filter((s) => sums.get(s.id) > 0);
+  // в «Чистыми» проект за месяц может выйти в ноль, а по дням — нет
+  const present = sources.filter((s) => keys.some((k) => val(k, s) !== 0));
   const shown = present.filter((s) => !inc.off.has(s.id));
   const total = shown.reduce((t, s) => t + sums.get(s.id), 0);
 
-  // VPN «целиком / ваша доля» — только если в периоде есть доход проекта с партнёром
-  $('#incVpn').hidden = !incomeRows.some((r) => S.projects.find((p) => p.id === r.projectId)?.partnerPct);
+  $('#incBy').hidden = net;
+  $('#incNet').hidden = inc.mode !== 'income';
+  // VPN «целиком / ваша доля» — только если в периоде есть деньги проекта с партнёром
+  $('#incVpn').hidden = !incomeRows.some((r) => incAmount(r) && S.projects.find((p) => p.id === r.projectId)?.partnerPct);
   const [yy, mm] = month.split('-').map(Number);
   const periodName = period === 'year' ? `за ${year} год` : `за ${new Date(Date.UTC(yy, mm - 1, 15)).toLocaleString('ru-RU', { month: 'long', timeZone: 'UTC' })}`;
-  $('#incomeTitle').textContent = `Доход ${periodName}`;
-  $('#incTotal').textContent = rub(total);
+  $('#incomeTitle').textContent = `${{ income: 'Доход', expense: 'Расходы', net: 'Чистыми' }[inc.mode]} ${periodName}`;
+  $('#incTotal').textContent = net ? signed(total) : rub(total);
+  $('#incTotal').className = net && total ? (total > 0 ? 'plus' : 'minus') : '';
   const passed = keys.filter(incPast).length;
-  $('#incSub').textContent = [inc.net ? 'чистыми, за вычетом комиссий' : 'до комиссий', passed ? `в среднем ${rub(total / passed)} ${period === 'year' ? 'в месяц' : 'в день'}` : ''].filter(Boolean).join(' · ');
+  const what = { income: inc.net ? 'чистыми, за вычетом комиссий' : 'до комиссий', expense: 'траты и потери при выводе', net: 'доход за вычетом комиссий и расходов' }[inc.mode];
+  $('#incSub').textContent = [what, passed ? `в среднем ${net ? signed(total / passed) : rub(total / passed)} ${period === 'year' ? 'в месяц' : 'в день'}` : ''].filter(Boolean).join(' · ');
+  $('#incChart').setAttribute('aria-label', `${{ income: 'Доход', expense: 'Расходы', net: 'Чистыми' }[inc.mode]} по ${period === 'year' ? 'месяцам' : 'дням'}`);
 
-  $('#incShare').innerHTML = total ? shown.map((s) => `<i style="flex:${sums.get(s.id)};background:${s.color}"></i>`).join('') : '';
+  // доли целого — только когда все части одного знака
+  $('#incShare').innerHTML = total && !net ? shown.map((s) => `<i style="flex:${sums.get(s.id)};background:${s.color}"></i>`).join('') : '';
   $('#incChips').innerHTML = present.length
     ? present
         .map((s) => {
           const off = inc.off.has(s.id);
-          return `<button class="inc-chip${off ? ' off' : ''}" type="button" data-src="${s.id}" aria-pressed="${!off}" title="${off ? 'Показать' : 'Скрыть'}"><i style="background:${s.color}"></i><span>${esc(s.name)}</span><span class="v">${rub(sums.get(s.id))}</span>${!off && total ? `<span class="p">${Math.round((sums.get(s.id) / total) * 100)}%</span>` : ''}</button>`;
+          const v = sums.get(s.id);
+          return `<button class="inc-chip${off ? ' off' : ''}" type="button" data-src="${s.id}" aria-pressed="${!off}" title="${off ? 'Показать' : 'Скрыть'}"><i style="background:${s.color}"></i><span>${esc(s.name)}</span><span class="v">${net ? signed(v) : rub(v)}</span>${!off && total && !net ? `<span class="p">${Math.round((v / total) * 100)}%</span>` : ''}</button>`;
         })
         .join('')
-    : '<div class="empty">Дохода за этот период нет.</div>';
+    : `<div class="empty">${{ income: 'Дохода', expense: 'Расходов', net: 'Ни дохода, ни расходов' }[inc.mode]} за этот период нет.</div>`;
 
   drawIncomeChart(keys, shown, val);
 
-  // лента: свежие сверху, только прошедшие дни; по умолчанию неделя
+  // лента: свежие сверху, только прошедшие дни; по умолчанию неделя.
+  // В «Чистыми» полоска — одна, цветом знака: доли проектов с разными знаками не складываются в длину.
   const past = keys.filter(incPast).reverse();
   const dayTotal = (k) => shown.reduce((t, s) => t + val(k, s), 0);
-  const max = Math.max(1, ...past.map(dayTotal));
+  const max = Math.max(1, ...past.map((k) => Math.abs(dayTotal(k))));
   const limit = period === 'year' || inc.allDays ? past.length : 7;
   $('#incDays').innerHTML =
     past
       .slice(0, limit)
       .map((k) => {
         const t = dayTotal(k);
+        const parts = shown.filter((s) => val(k, s) !== 0);
+        const any = parts.length > 0;
         const when = k.length === 7 ? MON_SHORT[Number(k.slice(5)) - 1] : `${incLabel(k)} ${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]}`;
-        const parts = shown.filter((s) => val(k, s) > 0);
-        const open = inc.open.has(k) && t > 0;
-        return `<button class="iday${t ? '' : ' zero'}" type="button" data-day="${k}" ${t ? `aria-expanded="${open}"` : 'tabindex="-1"'}>
+        const open = inc.open.has(k) && any;
+        const bar = net ? (t ? `<i class="${t > 0 ? 'pos' : 'neg'}"></i>` : '') : parts.map((s) => `<i style="flex:${val(k, s)};background:${s.color}"></i>`).join('');
+        const sum = !any ? '—' : net ? `<span class="${t > 0 ? 'plus' : t < 0 ? 'minus' : ''}">${signed(t)}</span>` : rub(t);
+        return `<button class="iday${any ? '' : ' zero'}" type="button" data-day="${k}" ${any ? `aria-expanded="${open}"` : 'tabindex="-1"'}>
           <span class="when">${when}</span>
-          <span class="ibar" style="width:${(t / max) * 100}%">${parts.map((s) => `<i style="flex:${val(k, s)};background:${s.color}"></i>`).join('')}</span>
-          <b>${t ? rub(t) : '—'}</b></button>${open ? `<div class="iday-d">${[...parts].sort((a, b) => val(k, b) - val(k, a)).map((s) => `<div><i style="background:${s.color}"></i><span>${esc(s.name)}</span><span>${rub(val(k, s))}</span></div>`).join('')}</div>` : ''}`;
+          <span class="ibar" style="width:${(Math.abs(t) / max) * 100}%">${bar}</span>
+          <b>${sum}</b></button>${open ? `<div class="iday-d">${[...parts].sort((a, b) => val(k, b) - val(k, a)).map((s) => `<div><i style="background:${s.color}"></i><span>${esc(s.name)}</span><span>${net ? signed(val(k, s)) : rub(val(k, s))}</span></div>`).join('')}</div>` : ''}`;
       })
       .join('') + (past.length > limit ? `<button class="btn ghost inc-more" type="button" data-alldays>Все дни месяца · ${past.length}</button>` : '');
 }
@@ -333,16 +361,16 @@ function drawIncomeChart(keys, shown, val) {
       label: s.name,
       data: keys.map((k) => (incPast(k) ? Math.round(val(k, s) / 10_000) / 100 : null)),
       backgroundColor: s.color,
-      // 2px зазор фоном между сегментами столбика
+      // 2px зазор фоном между сегментами столбика; ниже нуля сегменты растут вниз
       borderColor: '#121821',
-      borderWidth: { top: 2 },
+      borderWidth: (c) => (c.raw < 0 ? { bottom: 2 } : { top: 2 }),
       borderSkipped: false,
       borderRadius: 2,
       barPercentage: 0.7,
       categoryPercentage: 0.85,
     })),
   };
-  const fmtRub = (v) => `${Math.round(v).toLocaleString('ru-RU')} ₽`;
+  const fmtRub = (v) => `${v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('ru-RU')} ₽`;
   const opts = {
     responsive: true,
     maintainAspectRatio: false,
@@ -353,18 +381,18 @@ function drawIncomeChart(keys, shown, val) {
       tooltip: {
         backgroundColor: '#0b0f14', borderColor: '#232d3a', borderWidth: 1, padding: 10, cornerRadius: 10,
         titleColor: '#e6edf5', bodyColor: '#8b97a8', footerColor: '#e6edf5', usePointStyle: true, boxWidth: 8, boxHeight: 8,
-        filter: (c) => c.parsed.y > 0,
+        filter: (c) => c.parsed.y !== 0,
         itemSort: (a, b) => b.parsed.y - a.parsed.y,
         callbacks: {
           label: (c) => ` ${fmtRub(c.parsed.y)} · ${c.dataset.label}`,
-          footer: (items) => `Всего ${fmtRub(items.reduce((t, c) => t + (c.parsed.y || 0), 0))}`,
+          footer: (items) => `${inc.mode === 'net' ? 'Итого' : 'Всего'} ${fmtRub(items.reduce((t, c) => t + (c.parsed.y || 0), 0))}`,
         },
       },
     },
     scales: {
       x: { stacked: true, grid: { display: false }, ticks: { color: '#5e6a7b', maxTicksLimit: 10, font: { size: 10 } } },
-      y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,.05)' }, border: { display: false },
-        ticks: { color: '#5e6a7b', maxTicksLimit: 5, font: { size: 10 }, callback: (v) => (v >= 1000 ? `${Math.round(v / 100) / 10}к` : v) } },
+      y: { stacked: true, beginAtZero: true, grid: { color: (c) => (c.tick.value === 0 ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.05)') }, border: { display: false },
+        ticks: { color: '#5e6a7b', maxTicksLimit: 5, font: { size: 10 }, callback: (v) => (Math.abs(v) >= 1000 ? `${v < 0 ? '−' : ''}${Math.round(Math.abs(v) / 100) / 10}к` : v < 0 ? `−${-v}` : v) } },
     },
   };
   if (incChart) incChart.destroy();
@@ -978,12 +1006,12 @@ $('#adsBar').addEventListener('click', async (e) => {
     for (const x of buttons) x.disabled = false;
   }
 });
-for (const [sel, key, parse] of [['#incBy', 'by', (v) => v], ['#incNet', 'net', (v) => v === '1'], ['#incVpn', 'vpn', (v) => v]]) {
+for (const [sel, key, parse] of [['#incMode', 'mode', (v) => v], ['#incBy', 'by', (v) => v], ['#incNet', 'net', (v) => v === '1'], ['#incVpn', 'vpn', (v) => v]]) {
   $(sel).addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     inc[key] = parse(b.dataset[key]);
-    if (key === 'by') inc.off.clear(); // у видов и проектов свои id
+    if (key === 'by' || key === 'mode') inc.off.clear(); // у видов дохода, расхода и проектов свои id
     for (const x of $(sel).children) x.classList.toggle('on', x === b);
     renderIncome();
   });
@@ -991,7 +1019,7 @@ for (const [sel, key, parse] of [['#incBy', 'by', (v) => v], ['#incNet', 'net', 
 $('#incChips').addEventListener('click', (e) => {
   const b = e.target.closest('[data-src]');
   if (!b) return;
-  const id = Number(b.dataset.src);
+  const id = b.dataset.src;
   if (inc.off.has(id)) inc.off.delete(id);
   else if ($('#incChips').querySelectorAll('.inc-chip:not(.off)').length > 1) inc.off.add(id); // хоть один источник остаётся
   renderIncome();

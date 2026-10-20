@@ -60,6 +60,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .plus { color: var(--good); } .minus { color: var(--bad); }
 .seg.mini { grid-template-columns: repeat(2, auto); margin: 0; }
 .seg.mini button { padding: 4px 12px; }
+#incMode { grid-template-columns: repeat(3, auto); }
 .scroll-x { overflow-x: auto; margin-bottom: 20px; }
 .year td:first-child, .year th:first-child { position: sticky; left: 0; background: var(--panel); white-space: nowrap; }
 .year tr[data-month] { cursor: pointer; }
@@ -172,6 +173,7 @@ tr.total td { font-weight: 600; border-bottom: 0; }
 .iday-d div { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
 .iday-d i { width: 10px; height: 10px; border-radius: 3px; }
 .iday-d span:last-child { font-family: var(--mono); }
+.ibar i.pos, .ibar i.neg { flex: 1; } .ibar i.pos { background: var(--good); } .ibar i.neg { background: var(--bad); }
 .inc-more { margin-top: 6px; }
 .btn:disabled { opacity: .5; cursor: default; }
 

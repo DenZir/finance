@@ -1,6 +1,6 @@
 /**
- * Доход по дням и по месяцам: день — по Москве, разбивка по виду и проекту,
- * до комиссии и комиссия отдельно; расходы и переводы не в счёт.
+ * Доход и расходы по дням и по месяцам: день — по Москве, разбивка по виду и
+ * проекту, до комиссии и комиссия отдельно.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,11 +25,12 @@ test('доход по дням и месяцам', () => {
 
   const { from, to } = monthRange('2026-10');
   assert.deepEqual(incomeSeries(db, from, to, 'day'), [
-    { key: '2026-10-01', categoryId: null, projectId: null, gross: rub(70), fee: rub(9.8) },
-    { key: '2026-10-20', categoryId: cat('Приватка'), projectId: prj('Приватка MARIN'), gross: rub(1000), fee: rub(140) },
-    { key: '2026-10-20', categoryId: cat('VPN'), projectId: prj('VPN'), gross: rub(500), fee: rub(24 + 28) },
-    { key: '2026-10-21', categoryId: cat('Приватка'), projectId: prj('Приватка MARIN'), gross: rub(500), fee: rub(70) },
+    { key: '2026-10-01', kind: 'income', categoryId: null, projectId: null, gross: rub(70), fee: rub(9.8) },
+    { key: '2026-10-20', kind: 'expense', categoryId: null, projectId: null, gross: rub(50), fee: 0 },
+    { key: '2026-10-20', kind: 'income', categoryId: cat('Приватка'), projectId: prj('Приватка MARIN'), gross: rub(1000), fee: rub(140) },
+    { key: '2026-10-20', kind: 'income', categoryId: cat('VPN'), projectId: prj('VPN'), gross: rub(500), fee: rub(24 + 28) },
+    { key: '2026-10-21', kind: 'income', categoryId: cat('Приватка'), projectId: prj('Приватка MARIN'), gross: rub(500), fee: rub(70) },
   ]);
   const year = incomeSeries(db, monthRange('2026-01').from, monthRange('2026-12').to, 'month');
-  assert.deepEqual(year.map((r) => [r.key, r.gross]), [['2026-10', rub(70)], ['2026-10', rub(1500)], ['2026-10', rub(500)]]);
+  assert.deepEqual(year.map((r) => [r.key, r.kind, r.gross]), [['2026-10', 'expense', rub(50)], ['2026-10', 'income', rub(70)], ['2026-10', 'income', rub(1500)], ['2026-10', 'income', rub(500)]]);
 });

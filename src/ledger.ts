@@ -403,6 +403,8 @@ export function yearReport(db: Db, year: number): YearReport {
 export interface IncomeBucket {
   /** ГГГГ-ММ-ДД (по дням) или ГГГГ-ММ (по месяцам), по Москве */
   key: string;
+  /** income — доход; expense — расход; transfer — потери при выводе и обмене (в fee) */
+  kind: 'income' | 'expense' | 'transfer';
   categoryId: number | null;
   projectId: number | null;
   /** ₽-микро до комиссии */
@@ -412,19 +414,20 @@ export interface IncomeBucket {
 }
 
 /**
- * Доход периода по дням (или месяцам) × вид × проект — для графика и ленты
- * дней. Страница сама складывает по виду или по проекту, до комиссий или
- * чистыми, и считает долю владельца в проекте с партнёром.
+ * Доход, расходы и потери при выводе за период по дням (или месяцам) × вид ×
+ * проект — для графика и ленты дней. Страница сама складывает по виду или по
+ * проекту, до комиссий или без, считает «чистыми» и долю владельца в проекте с
+ * партнёром. Выплаты партнёру и «Остаток» сюда не входят: это не доход и не трата.
  */
 export function incomeSeries(db: Db, from: number, to: number, by: 'day' | 'month'): IncomeBucket[] {
   // день по Москве: UTC+3 без перехода на летнее время
   const fmt = by === 'day' ? '%Y-%m-%d' : '%Y-%m';
   return db
     .prepare(
-      `SELECT strftime('${fmt}', (at + 10800000) / 1000, 'unixepoch') AS key, category_id AS categoryId, project_id AS projectId,
+      `SELECT strftime('${fmt}', (at + 10800000) / 1000, 'unixepoch') AS key, kind, category_id AS categoryId, project_id AS projectId,
               SUM(gross_rub) AS gross, SUM(fee_rub) AS fee
-       FROM operations WHERE kind = 'income' AND at >= ? AND at < ?
-       GROUP BY key, category_id, project_id ORDER BY key`
+       FROM operations WHERE kind IN ('income', 'expense', 'transfer') AND at >= ? AND at < ?
+       GROUP BY key, kind, category_id, project_id ORDER BY key, kind`
     )
     .all(from, to) as IncomeBucket[];
 }

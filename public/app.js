@@ -25,6 +25,7 @@ let recurringEdit = null; // регулярный в окне правки; null
 let welcomeEdit = null; // размещение в окне правки; null — новое
 let fixDealId = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
+let people = []; // «Оплатить у человека»: его неоплаченные места одного вида
 let vpnRows = []; // оплаты VPN без платёжки
 let vpnSkipped = []; // отмеченные «Не учитывать»
 let vpnPicked = new Set();
@@ -295,6 +296,37 @@ function dealAge(date) {
 // отметить списком можно то, что ещё ждёт решения: не оплаченное, не бартер, не отменённое
 const pickable = (d) => (d.state === 'open' || d.state === 'waiting') && !d.cancelled;
 
+// оплатить можно то, что ждёт решения и с суммой
+const payable = (d) => pickable(d) && d.amount != null && d.amount > 0;
+const places = (n) => `${n} ${plural(n, 'место', 'места', 'мест')}`;
+
+// Люди, у которых два и больше неоплаченных места одного вида: за них платят
+// одним переводом (владелец, 2026-10-22). Продажи и закупы — отдельно.
+function peopleToPay() {
+  const by = new Map();
+  for (const d of deals) {
+    if (!pickable(d) || !d.contact.trim()) continue;
+    const key = `${d.kind}\u0000${d.contact.trim()}`;
+    if (!by.has(key)) by.set(key, { kind: d.kind, contact: d.contact.trim(), list: [] });
+    by.get(key).list.push(d);
+  }
+  return [...by.values()]
+    .filter((p) => p.list.filter(payable).length >= 2)
+    .sort((a, b) => a.list[0].date.localeCompare(b.list[0].date));
+}
+
+function personLine(p, i) {
+  const ok = p.list.filter(payable);
+  const sum = ok.reduce((s, d) => s + d.amount, 0);
+  const noSum = p.list.length - ok.length;
+  const days = [...new Set(ok.map((d) => dealDay(d.date)))];
+  const sub = [`${p.kind === 'sale' ? 'продажи' : 'закупы'}: ${places(ok.length)}`, days.length > 3 ? `${days[0]}–${days.at(-1)}` : days.join(', '), noSum ? `ещё ${noSum} без суммы` : ''].filter(Boolean).join(' · ');
+  return `<div class="deal person"><span class="when">${p.kind === 'sale' ? 'от него' : 'ему'}</span>
+    <div class="what"><b>${esc(p.contact)}</b><small>${sub}</small></div>
+    <div class="sum"><span class="${p.kind === 'sale' ? 'plus' : 'minus'}">${p.kind === 'sale' ? '+' : '−'}${rub(sum)}</span></div>
+    <div class="acts"><button class="btn btn-primary" type="button" data-pay-person="${i}">Оплатить всё</button></div></div>`;
+}
+
 // group — в какой группе строка («Ждём оплату», «Не разобраны»); без группы («Все сделки») выбора нет
 function dealLine(d, group) {
   const sum = d.amount == null ? '<span class="muted">суммы ещё нет</span>' : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(d.amount)}</span>`;
@@ -344,7 +376,10 @@ function renderAds() {
       (list.length ? list.map((d) => dealLine(d, key)).join('') : `<div class="empty">${empty}</div>`);
   };
   const unknown = S.ads.unknown ? `<div class="ads-sum"><span>без суммы: ${S.ads.unknown} — CPM ждёт просмотров или ПДП подсчёта, в долги пока не входят</span></div>` : '';
+  people = peopleToPay();
+  const byPerson = people.length ? `<h3 class="ads-h">Оплатить у человека · ${people.length}</h3>${people.map(personLine).join('')}` : '';
   $('#ads').innerHTML =
+    byPerson +
     group('waiting', 'Ждём оплату', waiting, 'Никто никому не должен.') + unknown +
     (unsorted.length ? group('unsorted', 'Не разобраны', unsorted, '') : '');
 }
@@ -982,6 +1017,25 @@ function openPay(ref) {
   });
 }
 
+// Несколько мест одним переводом: сумма делится по ценам мест (ads.ts, payDeals).
+function openPayMany(list, who) {
+  const ok = list.filter(payable);
+  if (!ok.length) return toast('Оплачивать нечего: у выбранных мест нет суммы');
+  if (new Set(ok.map((d) => d.kind)).size > 1) return toast('Продажи и закупы — отдельно: деньги идут в разные стороны');
+  const sale = ok[0].kind === 'sale';
+  const sum = ok.reduce((s, d) => s + d.amount, 0);
+  const skipped = list.length - ok.length;
+  showPay({
+    title: `${sale ? 'Оплачено' : 'Оплатил'}: ${places(ok.length)}`,
+    desc: `${who ? `${who} · ` : ''}${ok.map((d) => `${dealDay(d.date)} ${SLOT[d.slot] ?? d.slot}`).join(', ')} · ${rub(sum)}${skipped ? ` · без суммы и разобранные (${skipped}) — мимо` : ''}`,
+    amount: sum,
+    amountLabel: sale ? 'Сколько пришло всего' : 'Сколько ушло всего',
+    hint: `${sale ? 'Доход «Реклама»' : 'Расход «Закуп рекламы»'}, без комиссии. Впишите, сколько ${sale ? 'пришло' : 'ушло'} на самом деле: сумма разделится между местами по их цене, каждое станет оплаченным.`,
+    url: '/api/ad-deals/pay-many',
+    extra: { refs: ok.map((d) => d.ref) },
+  });
+}
+
 function showPay(target) {
   payTarget = target;
   const f = $('#payForm');
@@ -1306,6 +1360,11 @@ $('#walletForm').addEventListener('submit', async (e) => {
 $('#ads').addEventListener('click', async (e) => {
   const pay = e.target.closest('[data-pay]');
   if (pay) return openPay(pay.dataset.pay);
+  const person = e.target.closest('[data-pay-person]');
+  if (person) {
+    const p = people[Number(person.dataset.payPerson)];
+    return p && openPayMany(p.list, p.contact);
+  }
   const b = e.target.closest('[data-barter],[data-unbarter],[data-wait],[data-unwait]');
   if (!b) return;
   const { barter, unbarter, wait, unwait } = b.dataset;
@@ -1328,6 +1387,11 @@ $('#ads').addEventListener('change', (e) => {
 });
 $('#adsBar').addEventListener('click', async (e) => {
   if (e.target.closest('[data-bulk-clear]')) return renderAds();
+  if (e.target.closest('[data-bulk-pay]')) {
+    const list = deals.filter((d) => picked.has(d.ref));
+    const who = [...new Set(list.map((d) => d.contact.trim()))];
+    return openPayMany(list, who.length === 1 ? who[0] : '');
+  }
   const b = e.target.closest('[data-bulk]');
   if (!b || !picked.size) return;
   const buttons = $('#adsBar').querySelectorAll('button');

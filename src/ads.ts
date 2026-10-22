@@ -229,3 +229,44 @@ export function bulkMark(db: Db, refs: readonly string[], action: BulkAction, no
     return { changed, skipped };
   })();
 }
+
+/**
+ * «Оплатить всё» у человека: одним переводом за несколько мест (владелец,
+ * 2026-10-22). Сумма — сколько пришло или ушло на самом деле; делится между
+ * местами по их цене, остаток копеек — последнему, и каждое место — оплачено
+ * своей операцией, как по одной (payDeal). Всё одной транзакцией. Места без
+ * суммы, оплаченные, бартер, отменённые и неизвестные пропускаются; продажи и
+ * закупы вместе нельзя — деньги идут в разные стороны.
+ */
+export function payDeals(
+  db: Db,
+  refs: unknown,
+  input: { walletId: number; amount: number; rate: number; at: number },
+  now = Date.now()
+): { paid: number; skipped: number } {
+  if (!Array.isArray(refs) || refs.length === 0) throw new MoneyInputError('не выбрано ни одной сделки');
+  if (refs.length > BULK_MAX) throw new MoneyInputError(`за раз — не больше ${BULK_MAX} сделок`);
+  for (const ref of refs) {
+    if (typeof ref !== 'string' || !REF.test(ref)) throw new MoneyInputError(`«${String(ref).slice(0, 40)}» — не сделка`);
+  }
+  if (!(input.amount > 0)) throw new MoneyInputError('сумма больше нуля');
+  const byRef = new Map(listDeals(db).map((d) => [d.ref, d]));
+  const unique = [...new Set(refs as string[])];
+  const payable = unique
+    .map((ref) => byRef.get(ref))
+    .filter((d): d is AdDealView => !!d && (d.state === 'open' || d.state === 'waiting') && !d.cancelled && d.amount !== null && d.amount > 0);
+  if (!payable.length) throw new MoneyInputError('оплачивать нечего: у выбранных мест нет суммы или они уже разобраны');
+  if (new Set(payable.map((d) => d.kind)).size > 1) throw new MoneyInputError('продажи и закупы — отдельно: деньги идут в разные стороны');
+  const total = payable.reduce((s, d) => s + d.amount!, 0);
+  let left = input.amount;
+  const shares = payable.map((d, i) => {
+    const share = i === payable.length - 1 ? left : Math.floor((input.amount * d.amount!) / total);
+    left -= share;
+    return share;
+  });
+  if (shares.some((x) => x <= 0)) throw new MoneyInputError('сумма слишком мала, чтобы разделить её между местами');
+  return db.transaction(() => {
+    payable.forEach((d, i) => payDeal(db, d.ref, { ...input, amount: shares[i]! }, now));
+    return { paid: payable.length, skipped: unique.length - payable.length };
+  })();
+}

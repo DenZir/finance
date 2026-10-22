@@ -8,10 +8,10 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { openDb } from '../src/db/index.js';
 import { MICRO, MoneyInputError } from '../src/money.js';
-import { listWallets } from '../src/ledger.js';
+import { balances, listWallets, monthRange, monthReport } from '../src/ledger.js';
 import { SESSION_COOKIE, createSession } from '../src/auth.js';
 import { createApp } from '../src/server.js';
-import { adDebts, bulkMark, listDeals, payDeal, syncDeals, type AnalyticsDeal, type BulkAction } from '../src/ads.js';
+import { adDebts, bulkMark, listDeals, payDeal, payDeals, syncDeals, type AnalyticsDeal, type BulkAction } from '../src/ads.js';
 
 const T = Date.UTC(2026, 9, 19, 9);
 const SINCE = Date.UTC(2026, 9, 1) - 3 * 3600_000;
@@ -74,5 +74,57 @@ test('отметка списком: ждём оплату, бартер, не �
     assert.match((await bad.json()).error, /не выбрано/);
   } finally {
     srv.close();
+  }
+});
+
+// Человек заплатил одним переводом за все свои места (владелец, 2026-10-22).
+test('«Оплатить всё»: одна сумма делится по ценам мест, каждое — оплачено; без суммы и чужое — мимо', async () => {
+  const db = openDb(':memory:');
+  const list = [deal('sale:1', 1000), deal('sale:2', 2000), deal('sale:3', null), deal('sale:4', 500), deal('buy:7', 1200)];
+  await syncDeals(db, { fetchDeals: async () => list, since: SINCE }, T);
+  bulkMark(db, ['sale:1', 'sale:2'], 'waiting', T);
+  bulkMark(db, ['sale:4'], 'barter', T);
+  const cryptobot = listWallets(db).find((w) => w.name === 'CryptoBot')!.id;
+  const platega = listWallets(db).find((w) => w.name === 'Platega')!.id;
+  const state = (ref: string) => listDeals(db).find((d) => d.ref === ref)!.state;
+
+  assert.throws(() => payDeals(db, ['sale:1', 'buy:7'], { walletId: platega, amount: rub(100), rate: 1, at: T }, T), /продажи и закупы — отдельно/);
+  assert.throws(() => payDeals(db, ['sale:3', 'sale:4'], { walletId: platega, amount: rub(100), rate: 1, at: T }, T), /оплачивать нечего/);
+  assert.throws(() => payDeals(db, [], { walletId: platega, amount: rub(100), rate: 1, at: T }, T), /не выбрано/);
+  assert.throws(() => payDeals(db, ['x'], { walletId: platega, amount: rub(100), rate: 1, at: T }, T), /не сделка/);
+
+  // за 3 000 пришло 2 900 — скидка делится по ценам: 966,66 и 1 933,34
+  assert.deepEqual(payDeals(db, ['sale:1', 'sale:2', 'sale:3', 'sale:4', 'sale:99'], { walletId: platega, amount: rub(2_900), rate: 1, at: T }, T), { paid: 2, skipped: 3 });
+  assert.deepEqual(['sale:1', 'sale:2', 'sale:3', 'sale:4'].map(state), ['paid', 'paid', 'open', 'barter']);
+  const { from, to } = monthRange('2026-10');
+  const ops = db.prepare("SELECT source_ref AS ref, gross_rub AS rub FROM operations WHERE source = 'ads' ORDER BY ref").all();
+  assert.deepEqual(ops, [{ ref: 'sale:1', rub: rub(966.67) }, { ref: 'sale:2', rub: rub(1_933.33) }]);
+  assert.equal(balances(db).get(platega), rub(2_900), 'на кошелёк — ровно перевод');
+  assert.equal(monthReport(db, from, to).totalIncome, rub(2_900));
+  assert.deepEqual(adDebts(db).owedToUs, 0);
+
+  // закупы — на кошелёк в USDT по курсу; повторная оплата уже оплаченного — мимо
+  assert.deepEqual(payDeals(db, ['buy:7', 'sale:1'], { walletId: cryptobot, amount: rub(12), rate: 100, at: T }, T), { paid: 1, skipped: 1 });
+  assert.equal(balances(db).get(cryptobot), -rub(12));
+});
+
+test('«Оплатить всё» через API', async () => {
+  const db = openDb(':memory:');
+  await syncDeals(db, { fetchDeals: async () => [deal('sale:1', 1000), deal('sale:2', 500)], since: SINCE }, T);
+  const app = createApp({ db, config: { botToken: '1:' + 'x'.repeat(35), botUsername: 't', ownerIds: ['1'] }, fetchRate: async () => 100, now: () => T });
+  const server = app.listen(0);
+  try {
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const cookie = `${SESSION_COOKIE}=${createSession(db, '1', T)}`;
+    const post = (body: unknown) => fetch(`${url}/api/ad-deals/pay-many`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const platega = listWallets(db).find((w) => w.name === 'Platega')!.id;
+    const r = await post({ refs: ['sale:1', 'sale:2'], walletId: platega, amount: '1 500', at: T });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { paid: 2, skipped: 0 });
+    const again = await post({ refs: ['sale:1'], walletId: platega, amount: '10', at: T });
+    assert.equal(again.status, 400);
+    assert.match((await again.json()).error, /оплачивать нечего/);
+  } finally {
+    server.close();
   }
 });

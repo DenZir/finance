@@ -17,7 +17,7 @@ import {
   type WalletKind,
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
-import { adDebts, bulkMark, listDeals, payDeal, setBarter, setWaiting } from './ads.js';
+import { adDebts, bulkMark, listDeals, payDeal, payDeals, setBarter, setWaiting } from './ads.js';
 import { listSkipped, listUnsorted, resolveVpn, restoreVpn } from './vpn.js';
 import { createRecurring, deleteRecurring, listRecurring, payRecurring, skipRecurring, updateRecurring } from './recurring.js';
 import { partnerCheck, partnerCounted, partnerWallet } from './partner.js';
@@ -288,6 +288,17 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   app.post('/api/vpn/restore', async (req, res, next) => {
     try {
       res.json(await restoreVpn(db, (req.body ?? {}).refs, fetchRate, now()));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Несколько мест одним переводом; refs и что из них оплачивается, решает payDeals.
+  app.post('/api/ad-deals/pay-many', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
+      res.json(payDeals(db, b.refs, { walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now() }, now()));
     } catch (err) {
       next(err);
     }

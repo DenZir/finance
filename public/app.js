@@ -19,7 +19,8 @@ let adsAll = false;
 // что оплачивается в окне «Оплачено»: сделка рекламы или фиксация приветки
 let payTarget = null;
 let welcomeRows = [];
-let incomeRows = [];
+let incomeRows = []; // строки с expected — долги, которые «Если всё оплачено» считает оплаченными
+let tilesReport = null; // итоги периода для плашек: переключатель долгов перерисовывает «Чистыми»
 let recurringRows = [];
 let recurringEdit = null; // регулярный в окне правки; null — новый
 let welcomeEdit = null; // размещение в окне правки; null — новое
@@ -203,6 +204,7 @@ function spark(vals, color) {
 function netSeries() {
   const byKey = new Map();
   for (const r of incomeRows) {
+    if (r.expected && !inc.assume) continue;
     const v = r.kind === 'income' ? r.gross - r.fee : r.kind === 'expense' ? -r.gross : -r.fee;
     byKey.set(r.key, (byKey.get(r.key) ?? 0) + v);
   }
@@ -216,6 +218,11 @@ function renderTiles(report) {
   const share = (v) => (all > 0 ? Math.max(0, Math.min(100, (v / all) * 100)) : 0);
   const count = (pred) => S.wallets.filter((w) => !w.archived && pred(w)).length;
   const owedUs = S.ads.owedToUs + S.welcome.owed;
+  // «Если всё оплачено» — к итогам периода долги из ленты дохода, как в блоке «Доход»
+  const ahead = inc.assume ? incomeRows.filter((r) => r.expected) : [];
+  const aheadIncome = ahead.reduce((s, r) => s + (r.kind === 'income' ? r.gross : 0), 0);
+  const aheadNet = ahead.reduce((s, r) => s + (r.kind === 'income' ? r.gross - r.fee : -r.gross), 0);
+  report = { ...report, totalIncome: report.totalIncome + aheadIncome, net: report.net + aheadNet };
   const tiles = [
     { lbl: 'На платёжках', icon: IC.card, c: C.blue, val: rub(S.totals.onProviders), delta: '<span class="delta flat">не выведено</span>',
       sub: `кабинетов: ${count((w) => w.kind === 'provider')}`, bar: share(S.totals.onProviders) },
@@ -228,7 +235,7 @@ function renderTiles(report) {
       : { lbl: 'Должен партнёру', icon: IC.users, c: C.amber, val: '—', delta: '', sub: 'нет проектов с партнёром' },
     { lbl: period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', icon: IC.rub, c: report.net >= 0 ? C.green : C.red, val: rub(report.net), cls: report.net >= 0 ? 'good' : 'bad',
       delta: report.totalIncome ? `<span class="delta ${report.net >= 0 ? 'up' : 'dn'}">${Math.round((report.net / report.totalIncome) * 100)}% дохода</span>` : '<span class="delta flat">нет дохода</span>',
-      sub: 'доход − комиссии − расходы', spark: netSeries() },
+      sub: inc.assume ? `если всё оплатят${aheadNet ? `: ${aheadNet > 0 ? '+' : '−'}${rub(Math.abs(aheadNet))} долгами` : ' — долгов нет'}` : 'доход − комиссии − расходы', spark: netSeries() },
     { lbl: 'Нам должны', icon: IC.in, c: C.amber, val: rub(owedUs), cls: owedUs ? 'warn' : '',
       delta: `<span class="delta ${owedUs ? 'warn' : 'flat'}">${S.ads.owedToUsCount + S.welcome.count || 'никто'}</span>`,
       sub: [S.ads.owedToUsCount ? `реклама: ${S.ads.owedToUsCount}` : '', S.welcome.count ? `приветка: ${S.welcome.count}` : ''].filter(Boolean).join(' · ') || 'никто не должен' },
@@ -426,7 +433,8 @@ if (window.Chart) Chart.register({
     args.inChartArea = e.x >= a.left && e.x <= a.right && e.y >= a.top && e.y <= a.bottom;
   },
 });
-const inc = { mode: 'income', by: 'cat', net: false, vpn: 'all', off: new Set(), open: new Set(), allDays: false };
+// assume — «Если всё оплачено»: долги рекламы и приветки (строки с expected) как оплаченные
+const inc = { mode: 'income', by: 'cat', net: false, vpn: 'all', assume: false, off: new Set(), open: new Set(), allDays: false };
 let incChart = null;
 // потери при выводе и обмене: у перевода нет ни вида, ни проекта
 const FEES = { id: 'fees', name: 'Комиссии выводов', color: '#7d8796' };
@@ -443,6 +451,7 @@ function incSources() {
 // сумма строки с учётом переключателей: до комиссий / чистыми, VPN целиком / доля владельца.
 // В «Чистыми» расходы и потери при выводе — со знаком минус.
 function incAmount(r) {
+  if (r.expected && !inc.assume) return 0;
   if (inc.mode === 'income' && r.kind !== 'income') return 0;
   if (inc.mode === 'expense' && r.kind === 'income') return 0;
   let v = r.kind === 'income' ? (inc.net || inc.mode === 'net' ? r.gross - r.fee : r.gross) : r.kind === 'expense' ? r.gross : r.fee;
@@ -470,20 +479,26 @@ function renderIncome() {
   const other = sources.find((s) => s.code === otherCode) ?? sources.filter((s) => s !== FEES).at(-1) ?? FEES;
   const srcOf = (r) => (r.kind === 'transfer' ? FEES : sources.find((s) => s.id === String(incBy() === 'cat' ? r.categoryId : r.projectId)) ?? other);
   const keys = incKeys();
-  // ячейка × источник
+  // ячейка × источник; ahead — та часть, что пока долг
   const cell = new Map();
+  const ahead = new Map();
   for (const r of incomeRows) {
     const v = incAmount(r);
     if (!v) continue;
     const k = `${r.key}|${srcOf(r).id}`;
     cell.set(k, (cell.get(k) ?? 0) + v);
+    if (r.expected) ahead.set(k, (ahead.get(k) ?? 0) + v);
   }
   const val = (key, s) => cell.get(`${key}|${s.id}`) ?? 0;
+  const valAhead = (key, s) => ahead.get(`${key}|${s.id}`) ?? 0;
   const sums = new Map(sources.map((s) => [s.id, keys.reduce((t, k) => t + val(k, s), 0)]));
   // в «Чистыми» проект за месяц может выйти в ноль, а по дням — нет
   const present = sources.filter((s) => keys.some((k) => val(k, s) !== 0));
   const shown = present.filter((s) => !inc.off.has(s.id));
   const total = shown.reduce((t, s) => t + sums.get(s.id), 0);
+  const aheadTotal = shown.reduce((t, s) => t + keys.reduce((u, k) => u + valAhead(k, s), 0), 0);
+  // день впереди виден, только если на него стоит долг (место завтра, оплату ждём)
+  const seen = (k) => incPast(k) || shown.some((s) => val(k, s) !== 0);
 
   $('#incBy').hidden = net;
   $('#incNet').hidden = inc.mode !== 'income';
@@ -496,7 +511,8 @@ function renderIncome() {
   $('#incTotal').className = net && total ? (total > 0 ? 'plus' : 'minus') : '';
   const passed = keys.filter(incPast).length;
   const what = { income: inc.net ? 'чистыми, за вычетом комиссий' : 'до комиссий', expense: 'траты и потери при выводе', net: 'доход за вычетом комиссий и расходов' }[inc.mode];
-  $('#incSub').textContent = [what, passed ? `в среднем ${net ? signed(total / passed) : rub(total / passed)} ${period === 'year' ? 'в месяц' : 'в день'}` : ''].filter(Boolean).join(' · ');
+  const owed = !inc.assume ? '' : aheadTotal ? `из них ждём оплату ${net ? signed(aheadTotal) : rub(aheadTotal)}` : 'долгов за период нет';
+  $('#incSub').textContent = [what, owed, passed ? `в среднем ${net ? signed(total / passed) : rub(total / passed)} ${period === 'year' ? 'в месяц' : 'в день'}` : ''].filter(Boolean).join(' · ');
   $('#incChart').setAttribute('aria-label', `${{ income: 'Доход', expense: 'Расходы', net: 'Чистыми' }[inc.mode]} по ${period === 'year' ? 'месяцам' : 'дням'}`);
 
   // доли целого — только когда все части одного знака
@@ -511,11 +527,11 @@ function renderIncome() {
         .join('')
     : `<div class="empty">${{ income: 'Дохода', expense: 'Расходов', net: 'Ни дохода, ни расходов' }[inc.mode]} за этот период нет.</div>`;
 
-  drawIncomeChart(keys, shown, val);
+  drawIncomeChart(keys, shown, val, valAhead, seen);
 
   // лента: свежие сверху, только прошедшие дни; по умолчанию неделя.
   // В «Чистыми» полоска — одна, цветом знака: доли проектов с разными знаками не складываются в длину.
-  const past = keys.filter(incPast).reverse();
+  const past = keys.filter(seen).reverse();
   const dayTotal = (k) => shown.reduce((t, s) => t + val(k, s), 0);
   const max = Math.max(1, ...past.map((k) => Math.abs(dayTotal(k))));
   const limit = period === 'year' || inc.allDays ? past.length : 7;
@@ -538,18 +554,24 @@ function renderIncome() {
       .join('') + (past.length > limit ? `<button class="btn ghost inc-more" type="button" data-alldays>Все дни месяца · ${past.length}</button>` : '');
 }
 
-function drawIncomeChart(keys, shown, val) {
+// долги — отдельными полупрозрачными сегментами поверх оплаченного
+function drawIncomeChart(keys, shown, val, valAhead, seen) {
   if (!window.Chart) {
     $('#incFallback').hidden = false;
     return;
   }
   $('#incFallback').hidden = true;
+  const r2 = (v) => Math.round(v / 10_000) / 100;
+  const series = [
+    ...shown.map((s) => ({ label: s.name, color: s.color, at: (k) => val(k, s) - valAhead(k, s) })),
+    ...shown.filter((s) => keys.some((k) => valAhead(k, s))).map((s) => ({ label: `${s.name} · ждём оплату`, color: `${s.color}59`, at: (k) => valAhead(k, s) })),
+  ];
   const data = {
     labels: keys.map(incLabel),
-    datasets: shown.map((s) => ({
-      label: s.name,
-      data: keys.map((k) => (incPast(k) ? Math.round(val(k, s) / 10_000) / 100 : null)),
-      backgroundColor: s.color,
+    datasets: series.map(({ label, color, at }) => ({
+      label,
+      data: keys.map((k) => (seen(k) ? r2(at(k)) : null)),
+      backgroundColor: color,
       // 2px зазор фоном между сегментами столбика; ниже нуля сегменты растут вниз
       borderColor: '#0f141b',
       borderWidth: (c) => (c.raw < 0 ? { bottom: 2 } : { top: 2 }),
@@ -1194,7 +1216,8 @@ async function load() {
     b.setAttribute('aria-pressed', String(b.dataset.period === period));
   }
   $('#reportTitle').textContent = byYear ? 'Итоги года' : 'Итоги месяца';
-  renderTiles(byYear ? report.total : report);
+  tilesReport = byYear ? report.total : report;
+  renderTiles(tilesReport);
   renderTodo();
   renderBadges();
   const usdt = S.wallets.find((w) => w.currency === 'USDT' && w.rate);
@@ -1406,7 +1429,7 @@ $('#adsBar').addEventListener('click', async (e) => {
     for (const x of buttons) x.disabled = false;
   }
 });
-for (const [sel, key, parse] of [['#incMode', 'mode', (v) => v], ['#incBy', 'by', (v) => v], ['#incNet', 'net', (v) => v === '1'], ['#incVpn', 'vpn', (v) => v]]) {
+for (const [sel, key, parse] of [['#incMode', 'mode', (v) => v], ['#incBy', 'by', (v) => v], ['#incNet', 'net', (v) => v === '1'], ['#incVpn', 'vpn', (v) => v], ['#incAssume', 'assume', (v) => v === '1']]) {
   $(sel).addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -1414,6 +1437,7 @@ for (const [sel, key, parse] of [['#incMode', 'mode', (v) => v], ['#incBy', 'by'
     if (key === 'by' || key === 'mode') inc.off.clear(); // у видов дохода, расхода и проектов свои id
     for (const x of $(sel).children) x.classList.toggle('on', x === b);
     renderIncome();
+    if (key === 'assume') renderTiles(tilesReport);
   });
 }
 $('#incChips').addEventListener('click', (e) => {

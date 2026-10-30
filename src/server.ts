@@ -22,6 +22,7 @@ import { listSkipped, listUnsorted, resolveVpn, restoreVpn } from './vpn.js';
 import { createRecurring, deleteRecurring, listRecurring, payRecurring, skipRecurring, updateRecurring } from './recurring.js';
 import { partnerCheck, partnerCounted, partnerWallet } from './partner.js';
 import { createWelcome, deleteFix, deleteWelcome, fixWelcome, listWelcome, payFix, updateWelcome, welcomeDebts } from './welcome.js';
+import { expectedSeries } from './expected.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -127,16 +128,18 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
     res.json(monthReport(db, from, to));
   });
 
-  // Доход по дням месяца (?month=2026-10) или по месяцам года (?year=2026).
+  // Доход по дням месяца (?month=2026-10) или по месяцам года (?year=2026). Долги —
+  // строками с expected: true; «По факту» страница их просто не складывает.
   app.get('/api/income', (req, res) => {
+    const series = (from: number, to: number, by: 'day' | 'month') => [...incomeSeries(db, from, to, by), ...expectedSeries(db, from, to, by)];
     if (req.query.year !== undefined) {
       const year = Number(req.query.year);
       if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new MoneyInputError('год — от 2000 до 2100');
-      res.json(incomeSeries(db, monthRange(`${year}-01`).from, monthRange(`${year}-12`).to, 'month'));
+      res.json(series(monthRange(`${year}-01`).from, monthRange(`${year}-12`).to, 'month'));
       return;
     }
     const { from, to } = monthRange(String(req.query.month ?? ''));
-    res.json(incomeSeries(db, from, to, 'day'));
+    res.json(series(from, to, 'day'));
   });
 
   app.get('/api/year', (req, res) => {

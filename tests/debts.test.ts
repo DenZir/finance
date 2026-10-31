@@ -20,7 +20,7 @@ import {
 import { adDebts, listDeals, payDeal, setWaiting, syncDeals, type AnalyticsDeal } from '../src/ads.js';
 import { createWelcome, fixWelcome, listWelcome, payFix, welcomeDebts } from '../src/welcome.js';
 import { closeDebt, debtTotals, deletePayment, listDebtItems, offsetPerson, payPerson, personDebt, personDebts } from '../src/debts.js';
-import { backfillPeople, listPeople } from '../src/people.js';
+import { backfillPeople, createPerson, listPeople } from '../src/people.js';
 import { expectedSeries } from '../src/expected.js';
 import { SESSION_COOKIE, createSession } from '../src/auth.js';
 import { createApp } from '../src/server.js';
@@ -378,4 +378,16 @@ test('API: люди, оплата, взаимозачёт, удаление оп
   } finally {
     server.close();
   }
+});
+
+/**
+ * Список людей — все известные, и те, с кем пока в расчёте. Страница берёт из
+ * него подсказки в приветке и выбор «Объединить с»: заведённого вручную без
+ * позиций там не было, и склеить с ним дубль было нельзя.
+ */
+test('человек без позиций — в списке, с нулями', () => {
+  const db = openDb(':memory:');
+  const id = createPerson(db, 'Новый (@new_guy)');
+  const g = personDebts(db).find((p) => p.personId === id)!;
+  assert.deepEqual([g.name, g.username, g.owedToUs, g.weOwe, g.items.length], ['Новый', 'new_guy', 0, 0, 0]);
 });

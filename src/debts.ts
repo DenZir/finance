@@ -285,7 +285,9 @@ function group(
 }
 
 /**
- * Долги по людям: у кого есть позиции, аванс или оплаты. Сначала те, у кого
+ * Долги по людям — все известные люди, и те, с кем пока в расчёте: страница по
+ * этому же списку подсказывает человека в приветке и выбирает, с кем объединить
+ * (только что заведённого без позиций там не было). Сначала те, у кого
  * долг (больший выше), потом по имени. Позиции без контакта — своей группой
  * «без контакта» (personId null): платить по ним — указав человека.
  */
@@ -296,7 +298,7 @@ export function personDebts(db: Db): PersonDebts[] {
   for (const p of listPeople(db)) {
     const own = payments.filter((x) => x.personId === p.id).map(({ personId: _p, ...v }) => v);
     const g = group(p, items.filter((i) => i.personId === p.id).map(strip), own, advanceLeft);
-    if (g.items.length || g.payments.length || g.advanceIn || g.advanceOut) groups.push(g);
+    groups.push(g);
   }
   const orphans = items.filter((i) => i.personId === null).map(strip);
   if (orphans.length) groups.push(group({ id: null, name: NO_CONTACT, username: null }, orphans, [], advanceLeft));

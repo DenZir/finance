@@ -9,11 +9,15 @@
  * День — день места или фиксации, вид и проект — те же, что получит операция при
  * «Оплачено» (payDeal, payFix), чтобы после оплаты сумма осталась на своём месте.
  * Комиссии нет: реклама и приветка оплачиваются переводом.
+ *
+ * С 2026-10-31 долг — позиции долга по людям (debts.ts), и в счёт идёт их
+ * остаток, а не полная сумма: оплаченная часть уже лежит в доходе того же дня, и
+ * полная сумма посчиталась бы дважды. Покрытое авансом и прощённое — тоже не
+ * долг.
  */
 import type { Db } from './db/index.js';
-import { categoryIdByCode, projectIdByCode, type IncomeBucket } from './ledger.js';
-import { listDeals } from './ads.js';
-import { welcomeDebts } from './welcome.js';
+import { projectIdByCode, type IncomeBucket } from './ledger.js';
+import { listDebtItems } from './debts.js';
 
 export type ExpectedBucket = IncomeBucket & { expected: true };
 
@@ -24,14 +28,9 @@ export function expectedSeries(db: Db, from: number, to: number, by: 'day' | 'mo
   const first = mskDate(from);
   const end = mskDate(to); // начало следующего периода — не входит
   const project = projectIdByCode(db, 'ads');
-  const items: { date: string; kind: 'income' | 'expense'; categoryId: number | null; amount: number }[] = [];
-  for (const d of listDeals(db)) {
-    if (d.state !== 'waiting' || d.cancelled || !d.amount) continue;
-    const code = d.kind === 'buy' ? 'ads_buy' : d.slot === 'stories' ? 'ads_stories' : 'ads_posts';
-    items.push({ date: d.date, kind: d.kind === 'buy' ? 'expense' : 'income', categoryId: categoryIdByCode(db, code), amount: d.amount });
-  }
-  const welcome = categoryIdByCode(db, 'welcome');
-  for (const f of welcomeDebts(db)) items.push({ date: f.onDate, kind: 'income', categoryId: welcome, amount: f.amount });
+  const items = listDebtItems(db)
+    .filter((i) => i.remaining > 0)
+    .map((i) => ({ date: i.date, kind: i.dir === 'out' ? ('expense' as const) : ('income' as const), categoryId: i.categoryId, amount: i.remaining }));
 
   const buckets = new Map<string, ExpectedBucket>();
   for (const it of items) {

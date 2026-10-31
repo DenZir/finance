@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { MIGRATIONS } from './migrations.js';
+import { backfillPeople } from '../people.js';
 
 export type Db = Database.Database;
 
@@ -17,6 +18,8 @@ export function openDb(file: string): Db {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   migrate(db);
+  // люди из контактов, записанных до появления людей (people.ts)
+  backfillPeople(db);
   return db;
 }
 

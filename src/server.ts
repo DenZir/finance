@@ -17,11 +17,13 @@ import {
   type WalletKind,
 } from './ledger.js';
 import { currentRate, type RateFetcher } from './rates.js';
-import { adDebts, bulkMark, listDeals, payDeal, payDeals, setBarter, setWaiting } from './ads.js';
+import { adDebts, bulkMark, listDeals, payDeal, payDeals, setBarter, setDealPerson, setWaiting } from './ads.js';
 import { listSkipped, listUnsorted, resolveVpn, restoreVpn } from './vpn.js';
 import { createRecurring, deleteRecurring, listRecurring, payRecurring, skipRecurring, updateRecurring } from './recurring.js';
 import { partnerCheck, partnerCounted, partnerWallet } from './partner.js';
-import { createWelcome, deleteFix, deleteWelcome, fixWelcome, listWelcome, payFix, updateWelcome, welcomeDebts } from './welcome.js';
+import { createWelcome, deleteFix, deleteWelcome, deleteWelcomeLink, fixWelcome, listWelcome, newWelcomeLink, payFix, updateWelcome, welcomeDebts } from './welcome.js';
+import { createPerson, mergePeople, renamePerson } from './people.js';
+import { closeDebt, debtTotals, deletePayment, offsetPerson, payPerson, personDebt, personDebts } from './debts.js';
 import { expectedSeries } from './expected.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -110,8 +112,9 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
         ads: adDebts(db),
         welcome: (() => {
           const debts = welcomeDebts(db);
-          return { owed: debts.reduce((s, d) => s + d.amount, 0), count: debts.length };
+          return { owed: debts.reduce((s, d) => s + d.remaining, 0), count: debts.length };
         })(),
+        debts: debtTotals(db),
       });
     } catch (err) {
       next(err);
@@ -226,7 +229,15 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
     res.json({ id: createWelcome(db, req.body ?? {}, now()) });
   });
   app.patch('/api/welcome/:id', (req, res) => {
-    updateWelcome(db, reqId(req.params.id, 'размещение'), req.body ?? {});
+    updateWelcome(db, reqId(req.params.id, 'размещение'), req.body ?? {}, now());
+    res.json({ ok: true });
+  });
+  // покупатель сменил ссылку: счётчик заявок с нуля, цена по умолчанию — прежняя
+  app.post('/api/welcome/:id/links', (req, res) => {
+    res.json({ id: newWelcomeLink(db, reqId(req.params.id, 'размещение'), req.body ?? {}, now()) });
+  });
+  app.delete('/api/welcome-link/:id', (req, res) => {
+    deleteWelcomeLink(db, reqId(req.params.id, 'ссылка'));
     res.json({ ok: true });
   });
   app.delete('/api/welcome/:id', (req, res) => {
@@ -244,10 +255,10 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
     try {
       const b = req.body ?? {};
       const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
-      const id = payFix(db, reqId(req.params.id, 'фиксация'), {
-        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+      const r = payFix(db, reqId(req.params.id, 'фиксация'), {
+        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(), note: b.note,
       }, now());
-      res.json({ id });
+      res.json({ id: r.paymentId, ...r });
     } catch (err) {
       next(err);
     }
@@ -311,10 +322,10 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
     try {
       const b = req.body ?? {};
       const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
-      const id = payDeal(db, String(req.params.ref), {
-        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+      const r = payDeal(db, String(req.params.ref), {
+        walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(), note: b.note,
       }, now());
-      res.json({ id });
+      res.json({ id: r.paymentId ?? ('opId' in r ? r.opId : null), ...r });
     } catch (err) {
       next(err);
     }
@@ -327,6 +338,58 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
 
   app.post('/api/ad-deals/:ref/waiting', (req, res) => {
     setWaiting(db, String(req.params.ref), req.body?.on !== false, now());
+    res.json({ ok: true });
+  });
+
+  app.post('/api/ad-deals/:ref/person', (req, res) => {
+    setDealPerson(db, String(req.params.ref), reqId(req.body?.personId, 'человек'));
+    res.json({ ok: true });
+  });
+
+  // --- люди и долги по ним (debts.ts) ------------------------------------------------
+  app.get('/api/people', (_req, res) => {
+    res.json(personDebts(db));
+  });
+  app.post('/api/people', (req, res) => {
+    res.json({ id: createPerson(db, req.body?.contact, now()) });
+  });
+  app.post('/api/people/merge', (req, res) => {
+    const b = req.body ?? {};
+    mergePeople(db, reqId(b.from, 'кого объединить'), reqId(b.into, 'с кем объединить'));
+    res.json({ ok: true });
+  });
+  app.get('/api/people/:id', (req, res) => {
+    res.json(personDebt(db, reqId(req.params.id, 'человек')));
+  });
+  app.patch('/api/people/:id', (req, res) => {
+    const b = req.body ?? {};
+    renamePerson(db, reqId(req.params.id, 'человек'), { name: b.name, username: b.username });
+    res.json({ ok: true });
+  });
+  // «Оплачено» у человека: без refs — самые старые позиции первыми, с refs — выбранные
+  app.post('/api/people/:id/pay', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const w = getWallet(db, reqId(b.walletId, 'кошелёк'));
+      res.json(payPerson(db, reqId(req.params.id, 'человек'), {
+        dir: b.dir, walletId: w.id, amount: parseAmount(b.amount), rate: await rateFor(w.currency, b.rate), at: Number(b.at) || now(),
+        refs: b.refs, note: b.note,
+      }, now()));
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.post('/api/people/:id/offset', (req, res) => {
+    const b = req.body ?? {};
+    const amount = b.amount === undefined || b.amount === null || b.amount === '' ? null : parseAmount(b.amount);
+    res.json(offsetPerson(db, reqId(req.params.id, 'человек'), { amount, at: Number(b.at) || now(), note: b.note }, now()));
+  });
+  app.delete('/api/payments/:id', (req, res) => {
+    res.json({ deleted: deletePayment(db, reqId(req.params.id, 'оплата')) });
+  });
+  // «Простить остаток»; on: false — снова ждём
+  app.post('/api/debts/:ref/close', (req, res) => {
+    closeDebt(db, String(req.params.ref), req.body?.on !== false, now(), req.body?.note);
     res.json({ ok: true });
   });
 
@@ -426,7 +489,8 @@ export function createApp({ db, config, fetchRate, now = Date.now }: AppDeps) {
   // Ошибка ввода — понятным текстом владельцу; остальное — в журнал.
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof MoneyInputError) {
-      res.status(400).json({ error: err.message });
+      // code — когда странице мало текста и нужно предложить действие (new_link)
+      res.status(400).json(err.code ? { error: err.message, code: err.code } : { error: err.message });
       return;
     }
     console.error('[server] ошибка:', err);

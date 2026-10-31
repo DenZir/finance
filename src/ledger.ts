@@ -109,15 +109,17 @@ interface OpBase {
   note?: string;
   source?: string;
   sourceRef?: string | null;
+  /** часть оплаты или взаимозачёта с человеком (debts.ts) */
+  paymentId?: number | null;
 }
 
 function insertOp(db: Db, kind: OpKind, base: OpBase, categoryId: number | null, grossRub: number, feeRub: number, now: number): number {
   const info = db
     .prepare(
-      `INSERT INTO operations (kind, at, project_id, category_id, note, gross_rub, fee_rub, source, source_ref, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO operations (kind, at, project_id, category_id, note, gross_rub, fee_rub, source, source_ref, payment_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(kind, base.at, base.projectId ?? null, categoryId, (base.note ?? '').trim(), grossRub, feeRub, base.source ?? 'manual', base.sourceRef ?? null, now);
+    .run(kind, base.at, base.projectId ?? null, categoryId, (base.note ?? '').trim(), grossRub, feeRub, base.source ?? 'manual', base.sourceRef ?? null, base.paymentId ?? null, now);
   return Number(info.lastInsertRowid);
 }
 
@@ -188,11 +190,18 @@ export function addIncome(
 /** Расход с кошелька. У проекта с партнёром его доля расхода сама уменьшит долг перед ним (partnerDebts). */
 export function addExpense(
   db: Db,
-  input: OpBase & { walletId: number; amount: number; rate: number; categoryId?: number | null },
+  input: OpBase & {
+    walletId: number;
+    amount: number;
+    rate: number;
+    categoryId?: number | null;
+    /** точная сумма в ₽ (доля оплаты человеку), а в валюту кошелька пересчитано по курсу */
+    grossRub?: number;
+  },
   now = Date.now()
 ): number {
   const wallet = getWallet(db, input.walletId);
-  const rub = toRub(input.amount, input.rate);
+  const rub = input.grossRub ?? toRub(input.amount, input.rate);
   return db.transaction(() => {
     const id = insertOp(db, 'expense', input, checkRef(db, 'categories', input.categoryId, 'expense'), rub, 0, now);
     checkRef(db, 'projects', input.projectId);
@@ -286,6 +295,27 @@ export function addPartnerExpense(
 }
 
 /**
+ * Доход или расход без проводок — для взаимозачёта (debts.ts, владелец,
+ * 2026-10-31): он должен за продажу, владелец ему — за закуп, и обе стороны
+ * закрываются на одну сумму без движения денег. Кошельки не меняются, а в итоги,
+ * «Доход» и «Чистыми» операции входят как обычные: выручка и закуп были. Как
+ * addPartnerExpense, но без paid_by — платить никто не платил.
+ */
+export function addOffsetOp(
+  db: Db,
+  kind: 'income' | 'expense',
+  input: OpBase & { grossRub: number; categoryId?: number | null },
+  now = Date.now()
+): number {
+  if (!(input.grossRub > 0)) throw new MoneyInputError('сумма больше нуля');
+  return db.transaction(() => {
+    const id = insertOp(db, kind, input, checkRef(db, 'categories', input.categoryId, kind), input.grossRub, 0, now);
+    checkRef(db, 'projects', input.projectId);
+    return id;
+  })();
+}
+
+/**
  * «Остаток»: сколько на кошельке на самом деле на этот момент — по кабинету
  * платёжки или кошелька. Разница с насчитанным ложится поправкой, которая не
  * доход и не расход: начальные остатки и сверка не трогают отчёт.
@@ -306,10 +336,28 @@ export function addAdjustment(
   })();
 }
 
+/**
+ * Операция — часть оплаты человеку или взаимозачёта (payment_id): удаляется вся
+ * оплата целиком. Иначе удаление одной позиции оставило бы оплату разорванной —
+ * деньги пришли одним переводом, а в учёте половина его исчезла.
+ */
 export function deleteOperation(db: Db, id: number): boolean {
   return db.transaction(() => {
-    const deleted = db.prepare('DELETE FROM operations WHERE id = ?').run(id).changes > 0;
-    if (deleted) recomputeAdjustments(db);
+    const row = db.prepare('SELECT payment_id FROM operations WHERE id = ?').get(id) as { payment_id: number | null } | undefined;
+    if (!row) return false;
+    if (row.payment_id !== null) return deletePayment(db, row.payment_id);
+    db.prepare('DELETE FROM operations WHERE id = ?').run(id);
+    recomputeAdjustments(db);
+    return true;
+  })();
+}
+
+/** Оплата или взаимозачёт с человеком — со всеми операциями по позициям и авансом. */
+export function deletePayment(db: Db, paymentId: number): boolean {
+  return db.transaction(() => {
+    db.prepare('DELETE FROM operations WHERE payment_id = ?').run(paymentId);
+    const deleted = db.prepare('DELETE FROM payments WHERE id = ?').run(paymentId).changes > 0;
+    recomputeAdjustments(db);
     return deleted;
   })();
 }
@@ -330,6 +378,8 @@ export interface OperationRow {
   paidBy: 'partner' | null;
   paidAmount: number | null;
   paidCurrency: string | null;
+  /** часть оплаты с человеком: удаление операции удалит всю оплату */
+  paymentId: number | null;
   entries: { walletId: number; amount: number; rub: number }[];
 }
 
@@ -343,6 +393,7 @@ export function listOperations(db: Db, from: number, to: number): OperationRow[]
     id: o.id, kind: o.kind, at: o.at, projectId: o.project_id, categoryId: o.category_id, note: o.note,
     grossRub: o.gross_rub, feeRub: o.fee_rub, source: o.source, target: o.target ?? null,
     paidBy: o.paid_by ?? null, paidAmount: o.paid_amount ?? null, paidCurrency: o.paid_currency ?? null,
+    paymentId: o.payment_id ?? null,
     entries: entries.filter((e) => e.op_id === o.id).map((e) => ({ walletId: e.wallet_id, amount: e.amount, rub: e.rub })),
   }));
 }

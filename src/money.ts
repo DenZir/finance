@@ -5,7 +5,18 @@
 
 export const MICRO = 1_000_000;
 
-export class MoneyInputError extends Error {}
+/**
+ * Ошибка ввода — текст для владельца. code — для страницы, когда ей мало текста
+ * и нужно предложить действие: 'new_link' — «всего» по ссылке меньше прошлого,
+ * и страница спрашивает «Это новая ссылка?» (welcome.ts).
+ */
+export class MoneyInputError extends Error {
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 /**
  * «10 000,50», «10000.5», «9 700» → микро. Пробелы (и неразрывные) — разделитель

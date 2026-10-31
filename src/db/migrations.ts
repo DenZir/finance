@@ -321,4 +321,66 @@ export const MIGRATIONS: readonly string[] = [
   DROP TABLE recurring_tmp;
   DROP TABLE recurring_seq;
   `,
+  `
+  -- Долги по людям (владелец, 2026-10-31): один человек бывает должен и за
+  -- рекламу, и за приветку сразу, платит частями, переплачивает, а встречные
+  -- долги закрывает взаимозачётом. Считается по человеку целиком (debts.ts).
+  --
+  -- Человек узнаётся по @username (без @, в нижнем регистре), иначе по имени.
+  -- Люди из уже записанных контактов заводятся после миграций
+  -- (people.backfillPeople): разбирать «Иван (@ivan)» на SQL — громоздко.
+  CREATE TABLE people (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    username   TEXT,                          -- без @, lower; null — неизвестен
+    created_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX people_username ON people(username) WHERE username IS NOT NULL;
+  ALTER TABLE ad_deals ADD COLUMN person_id INTEGER REFERENCES people(id);
+  ALTER TABLE welcome_deals ADD COLUMN person_id INTEGER REFERENCES people(id);
+
+  -- Ссылка размещения в приветке: покупатель может сменить ссылку, и счётчик
+  -- заявок у него начинается с нуля; цена — своя у ссылки. welcome_fixes.total
+  -- теперь — всего по своей ссылке. Прежние фиксации — все в первую ссылку
+  -- размещения: смен ссылки до сих пор не записывали.
+  CREATE TABLE welcome_links (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    deal_id    INTEGER NOT NULL REFERENCES welcome_deals(id),
+    started_on TEXT    NOT NULL,              -- ГГГГ-ММ-ДД
+    price      INTEGER NOT NULL,              -- ₽-микро за заявку
+    label      TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX welcome_links_deal ON welcome_links(deal_id);
+  ALTER TABLE welcome_fixes ADD COLUMN link_id INTEGER REFERENCES welcome_links(id);
+  INSERT INTO welcome_links (deal_id, started_on, price, label, created_at)
+    SELECT id, started_on, price, '', created_at FROM welcome_deals ORDER BY id;
+  UPDATE welcome_fixes SET link_id = (SELECT l.id FROM welcome_links l WHERE l.deal_id = welcome_fixes.deal_id);
+
+  -- Оплата или взаимозачёт с человеком: одно действие владельца, под ним —
+  -- операции по позициям (source_ref '<позиция>@p<id>') и аванс с переплаты
+  -- (source 'advance', source_ref 'p<id>'). Удаляется только целиком.
+  CREATE TABLE payments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id  INTEGER NOT NULL REFERENCES people(id),
+    kind       TEXT    NOT NULL,              -- pay | offset
+    dir        TEXT    NOT NULL,              -- in — он нам; out — мы ему; both — взаимозачёт
+    at         INTEGER NOT NULL,
+    wallet_id  INTEGER REFERENCES wallets(id), -- null у взаимозачёта
+    amount     INTEGER NOT NULL,              -- микро в валюте кошелька; у взаимозачёта — ₽-микро
+    rate       REAL    NOT NULL DEFAULT 1,
+    note       TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  ALTER TABLE operations ADD COLUMN payment_id INTEGER REFERENCES payments(id);
+  CREATE INDEX operations_payment ON operations(payment_id);
+
+  -- «Простить остаток»: позиция закрыта, хотя оплачена не вся — скидка или
+  -- недоплата, которую уже не ждут.
+  CREATE TABLE debt_closures (
+    ref  TEXT PRIMARY KEY,                    -- sale:5 | buy:7 | fix:3
+    at   INTEGER NOT NULL,
+    note TEXT    NOT NULL DEFAULT ''
+  );
+  `,
 ];

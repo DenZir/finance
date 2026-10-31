@@ -2,7 +2,8 @@
  * «Если всё оплачено»: долги из «Нам должны» и «Мы должны» — по дню места или
  * фиксации, с тем видом и проектом, что получит оплата. Неразобранные, бартер,
  * отменённые и CPM без суммы — не долг; оплаченное уходит из ожидаемого в доход
- * на то же место, а не задваивается.
+ * на то же место, а не задваивается, — и частично оплаченное тоже: в ожидаемом
+ * только остаток.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,4 +67,11 @@ test('ожидаемое: долги как будто оплачены', async 
   assert.equal(expectedSeries(db, from, to, 'day').find((r) => r.categoryId === cat('ads_posts') && r.key === '2026-10-05'), undefined);
   const paid = incomeSeries(db, from, to, 'day').find((r) => r.key === '2026-10-05')!;
   assert.deepEqual([paid.categoryId, paid.projectId, paid.gross], [cat('ads_posts'), ads, rub(1500)]);
+
+  // оплачено частично — в ожидаемом остаток, а не полная сумма: оплаченная
+  // часть уже в доходе того же дня, и вместе было бы больше сделки (2026-10-31)
+  payDeal(db, 'buy:1', { walletId: w, amount: rub(1000), rate: 1, at: Date.UTC(2026, 9, 7, 12) }, T);
+  const buy = (rows: { key: string; kind: string; gross: number }[]) => rows.find((r) => r.key === '2026-10-07' && r.kind === 'expense')!.gross;
+  assert.equal(buy(expectedSeries(db, from, to, 'day')), rub(200));
+  assert.equal(buy(incomeSeries(db, from, to, 'day')), rub(1000));
 });

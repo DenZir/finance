@@ -69,7 +69,7 @@ test('сверка, оплата, бартер и долги по рекламе
     ['expense', 'Закуп рекламы', rub(1200), 'ads'],
     ['income', 'Реклама — сторисы', rub(1500), 'ads'],
   ]);
-  assert.match(ops.find((o) => o.kind === 'income')!.note, /Продажа · Иван \(@ivan\) · SATAN GAMES, MARIN GAMES/);
+  assert.match(ops.find((o) => o.kind === 'income')!.note, /Иван \(@ivan\) · сторисы · SATAN GAMES, MARIN GAMES/);
   const r = monthReport(db, from, to);
   assert.equal(r.net, rub(300), 'бартер в отчёт не попадает');
 

@@ -77,8 +77,10 @@ test('отметка списком: ждём оплату, бартер, не �
   }
 });
 
-// Человек заплатил одним переводом за все свои места (владелец, 2026-10-22).
-test('«Оплатить всё»: одна сумма делится по ценам мест, каждое — оплачено; без суммы и чужое — мимо', async () => {
+// Человек заплатил одним переводом за все свои места (владелец, 2026-10-22). С
+// 2026-10-31 сумма меньше суммы мест не делится по ценам, а закрывает места по
+// порядку: старые целиком, последнее — частично, остаток ждём.
+test('«Оплатить всё»: старые места целиком, последнее частично; без суммы и чужое — мимо', async () => {
   const db = openDb(':memory:');
   const list = [deal('sale:1', 1000), deal('sale:2', 2000), deal('sale:3', null), deal('sale:4', 500), deal('buy:7', 1200)];
   await syncDeals(db, { fetchDeals: async () => list, since: SINCE }, T);
@@ -93,18 +95,21 @@ test('«Оплатить всё»: одна сумма делится по це�
   assert.throws(() => payDeals(db, [], { walletId: platega, amount: rub(100), rate: 1, at: T }, T), /не выбрано/);
   assert.throws(() => payDeals(db, ['x'], { walletId: platega, amount: rub(100), rate: 1, at: T }, T), /не сделка/);
 
-  // за 3 000 пришло 2 900 — скидка делится по ценам: 966,66 и 1 933,34
-  assert.deepEqual(payDeals(db, ['sale:1', 'sale:2', 'sale:3', 'sale:4', 'sale:99'], { walletId: platega, amount: rub(2_900), rate: 1, at: T }, T), { paid: 2, skipped: 3 });
-  assert.deepEqual(['sale:1', 'sale:2', 'sale:3', 'sale:4'].map(state), ['paid', 'paid', 'open', 'barter']);
+  // за 3 000 пришло 2 900 — первое место целиком, второе: 1 900 из 2 000
+  assert.deepEqual(payDeals(db, ['sale:1', 'sale:2', 'sale:3', 'sale:4', 'sale:99'], { walletId: platega, amount: rub(2_900), rate: 1, at: T }, T),
+    { paymentId: 1, paid: 2, partial: 'sale:2', advance: 0, skipped: 3 });
+  assert.deepEqual(['sale:1', 'sale:2', 'sale:3', 'sale:4'].map(state), ['paid', 'waiting', 'open', 'barter']);
   const { from, to } = monthRange('2026-10');
   const ops = db.prepare("SELECT source_ref AS ref, gross_rub AS rub FROM operations WHERE source = 'ads' ORDER BY ref").all();
-  assert.deepEqual(ops, [{ ref: 'sale:1', rub: rub(966.67) }, { ref: 'sale:2', rub: rub(1_933.33) }]);
+  assert.deepEqual(ops, [{ ref: 'sale:1@p1', rub: rub(1_000) }, { ref: 'sale:2@p1', rub: rub(1_900) }]);
   assert.equal(balances(db).get(platega), rub(2_900), 'на кошелёк — ровно перевод');
   assert.equal(monthReport(db, from, to).totalIncome, rub(2_900));
-  assert.deepEqual(adDebts(db).owedToUs, 0);
+  assert.deepEqual(adDebts(db).owedToUs, rub(100), 'остаток второго места — долг');
+  assert.equal(listDeals(db).find((d) => d.ref === 'sale:2')!.paid, rub(1_900));
 
   // закупы — на кошелёк в USDT по курсу; повторная оплата уже оплаченного — мимо
-  assert.deepEqual(payDeals(db, ['buy:7', 'sale:1'], { walletId: cryptobot, amount: rub(12), rate: 100, at: T }, T), { paid: 1, skipped: 1 });
+  assert.deepEqual(payDeals(db, ['buy:7', 'sale:1'], { walletId: cryptobot, amount: rub(12), rate: 100, at: T }, T),
+    { paymentId: 2, paid: 1, partial: null, advance: 0, skipped: 1 });
   assert.equal(balances(db).get(cryptobot), -rub(12));
 });
 
@@ -120,7 +125,7 @@ test('«Оплатить всё» через API', async () => {
     const platega = listWallets(db).find((w) => w.name === 'Platega')!.id;
     const r = await post({ refs: ['sale:1', 'sale:2'], walletId: platega, amount: '1 500', at: T });
     assert.equal(r.status, 200);
-    assert.deepEqual(await r.json(), { paid: 2, skipped: 0 });
+    assert.deepEqual(await r.json(), { paymentId: 1, paid: 2, partial: null, advance: 0, skipped: 0 });
     const again = await post({ refs: ['sale:1'], walletId: platega, amount: '10', at: T });
     assert.equal(again.status, 400);
     assert.match((await again.json()).error, /оплачивать нечего/);

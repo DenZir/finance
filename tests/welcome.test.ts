@@ -12,6 +12,7 @@ import {
   createWelcome, deleteFix, deleteWelcome, deleteWelcomeLink, fixWelcome, listWelcome, newWelcomeLink, payFix, updateWelcome, welcomeDebts,
 } from '../src/welcome.js';
 import { debtsText } from '../src/bot/debts.js';
+import { personDebts } from '../src/debts.js';
 
 const T = Date.UTC(2026, 9, 20, 9);
 const rub = (n: number) => Math.round(n * MICRO);
@@ -34,7 +35,7 @@ test('приветка: фиксации, долг, оплата', () => {
   assert.deepEqual(welcomeDebts(db).map((x) => [x.amount, x.count]), [[rub(500), 100], [rub(1080), 240]]);
 
   // долг — в напоминании бота, рядом с рекламой
-  assert.match(debtsText([], '2026-10-20', welcomeDebts(db))!, /Нам должны 1.580.₽[\s\S]*Иван \(@ivan\) — 500.₽ · приветка, 100 заявок на 08\.10 · 12 дн\./);
+  assert.match(debtsText(personDebts(db), '2026-10-20')!, /Нам должны 1.580.₽\n• Иван \(@ivan\) — 1.580.₽\n.*приветка · 100 заявок · 08\.10 · 500.₽ · 12 дн\./);
 
   // оплата первой фиксации в USDT
   const cb = listWallets(db).find((w) => w.name === 'CryptoBot')!.id;

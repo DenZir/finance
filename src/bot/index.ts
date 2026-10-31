@@ -4,7 +4,7 @@
  * чужой не узнал даже, что бот что-то умеет.
  *
  * Строка вроде «сервер 20 usdt» — черновик операции с кнопками; /balance —
- * остатки; /debts и напоминание раз в день — долги по рекламе и приветке;
+ * остатки; /debts и напоминание раз в день — долги по людям (реклама и приветка);
  * /partner — сверка партнёрки по балансу.
  */
 import type { Db } from '../db/index.js';
@@ -14,7 +14,7 @@ import { describe, BotApiError, type BotApi, type Keyboard, type TgCallbackQuery
 import { QuickEntry, type Outcome } from './draft.js';
 import { balanceText } from './balance.js';
 import { debtsText, lastReminderDay, markReminderDay, reminderDue } from './debts.js';
-import { welcomeDebts } from '../welcome.js';
+import { personDebts } from '../debts.js';
 import { dueForNotice, listRecurring, markNoticed, type Recurring } from '../recurring.js';
 import { regularText } from './regular.js';
 import { amount, esc, mskDayStart, mskIso, rub } from './text.js';
@@ -63,7 +63,7 @@ export function createBot(deps: BotDeps) {
 
   const send = (chatId: number, text: string, keyboard?: Keyboard) => api.sendMessage(chatId, text, keyboard);
   const openPage: Keyboard | undefined = deps.publicUrl ? [[{ text: 'Открыть «Деньги»', url: deps.publicUrl }]] : undefined;
-  const debtsNow = () => debtsText(listDeals(db), mskIso(now()), welcomeDebts(db));
+  const debtsNow = () => debtsText(personDebts(db), mskIso(now()), listDeals(db));
 
   async function command(chatId: number, cmd: string, args: string): Promise<void> {
     switch (cmd) {

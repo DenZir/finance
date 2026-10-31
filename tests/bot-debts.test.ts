@@ -1,12 +1,14 @@
 /**
- * Долги по рекламе в боте: текст «Нам должны / Мы должны», напоминание раз в
- * день в 10:00 по Москве — и не второй раз после перезапуска.
+ * Долги в боте: текст «Нам должны / Мы должны» по людям (реклама и приветка),
+ * напоминание раз в день в 10:00 по Москве — и не второй раз после перезапуска.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db/index.js';
 import { MICRO } from '../src/money.js';
 import { setWaiting, syncDeals, type AdDealView, type AnalyticsDeal } from '../src/ads.js';
+import type { DebtItem, PersonDebts } from '../src/debts.js';
+import { createWelcome, fixWelcome } from '../src/welcome.js';
 import { createBot } from '../src/bot/index.js';
 import { BotApiError, botApi } from '../src/bot/api.js';
 import { debtsText, lastReminderDay, reminderDue } from '../src/bot/debts.js';
@@ -20,39 +22,123 @@ const at = (day: number, h: number, min = 0) => Date.UTC(2026, 9, day, h, min) -
 
 const view = (ref: string, over: Partial<AdDealView>): AdDealView => ({
   ref, kind: ref.startsWith('buy') ? 'buy' : 'sale', date: '2026-10-17', slot: 'evening', contact: '', channels: 'SATAN GAMES',
-  amount: rub(1000), cancelled: false, state: 'waiting', opId: null, paid: 0, remaining: rub(1000), personId: null, closed: false, ...over,
+  amount: null, cancelled: false, state: 'waiting', opId: null, paid: 0, remaining: 0, personId: null, closed: false, ...over,
 });
 
-test('текст долгов: группы, давние сверху, дни, сумма неизвестна; будущие и разобранные — нет', () => {
-  const deals = [
-    view('sale:3', { date: '2026-10-19', slot: 'n9', contact: 'Мария', amount: null }),
-    view('sale:1', { date: '2026-10-17', slot: 'stories', contact: 'Иван (@ivan)', amount: rub(1500) }),
-    view('sale:2', { date: '2026-10-18', contact: 'Пётр', amount: rub(800) }),
-    view('sale:4', { date: '2026-10-20', contact: 'Будущий' }),
-    view('sale:5', { contact: 'Отменили', cancelled: true }),
-    view('sale:6', { contact: 'Бартер', state: 'barter' }),
-    view('buy:1', { date: '2026-10-16', contact: 'Админ (@admin)', amount: rub(1200) }),
-    view('buy:2', { contact: 'Не разобран', state: 'open' }),
-    view('buy:3', { contact: 'Оплачен', state: 'paid', opId: 1 }),
+const item = (ref: string, over: Partial<DebtItem>): DebtItem => ({
+  ref, personId: null, dir: ref.startsWith('buy') ? 'out' : 'in', source: ref.startsWith('fix') ? 'welcome' : 'ads', date: '2026-10-17',
+  what: 'сторисы · SATAN GAMES', categoryId: null, projectId: null, amount: rub(1000), paid: 0, advance: 0, remaining: rub(1000), state: 'open', ...over,
+});
+
+const person = (personId: number | null, name: string, username: string | null, items: DebtItem[], over: Partial<PersonDebts> = {}): PersonDebts => {
+  const own = items.map((i) => ({ ...i, personId }));
+  const sum = (dir: 'in' | 'out') => own.filter((i) => i.dir === dir).reduce((s, i) => s + i.remaining, 0);
+  return { personId, name, username, owedToUs: sum('in'), weOwe: sum('out'), advanceIn: 0, advanceOut: 0, items: own, payments: [], ...over };
+};
+
+/**
+ * Владелец, 2026-10-31: долги — по человеку, а не по сделке. У Ивана продажа
+ * рекламы и фиксация приветки — одна строка «Иван — сумма» и позиции под ней;
+ * частично оплаченная — остатком и «оплачено X из Y»; давние долги — выше.
+ */
+test('текст долгов: по людям, позиции из обоих источников, остатки, давние сверху', () => {
+  const people = [
+    person(1, 'Иван', 'ivan', [
+      item('sale:1', { date: '2026-10-17', amount: rub(1500), remaining: rub(1500) }),
+      item('fix:2', { date: '2026-10-18', what: 'приветка · 240 заявок', amount: rub(1700), paid: rub(1000), remaining: rub(700), state: 'partial' }),
+      item('sale:8', { date: '2026-10-10', amount: rub(500), paid: rub(500), remaining: 0, state: 'paid' }),
+    ]),
+    person(2, 'Пётр', null, [item('sale:3', { date: '2026-10-16', what: 'пост вечер · MARIN', amount: rub(800), remaining: rub(800) })]),
+    person(4, 'Админ', 'admin', [item('buy:1', { date: '2026-10-16', what: 'пост вечер · SATAN GAMES', amount: rub(1200), remaining: rub(1200) })]),
+    person(null, 'без контакта', null, [item('sale:4', { date: '2026-10-18', what: 'пост день · CHANNEL', amount: rub(300), remaining: rub(300) })]),
   ];
-  assert.equal(plain(debtsText(deals, '2026-10-19')!), [
-    '💸 Нам должны 2 300 ₽ + ещё 1 без суммы',
-    '• Иван (@ivan) — 1 500 ₽ · сторисы 17.10 · 2 дн.',
-    '• Пётр — 800 ₽ · вечер 18.10 · 1 дн.',
-    '• Мария — сумма ещё не известна · 9:00 19.10 · сегодня',
+  // CPM без суммы — не позиция долга, но и не теряется: под контактом из аналитики
+  const deals = [
+    view('sale:5', { date: '2026-10-19', slot: 'n9', channels: 'MARIN GAMES', contact: 'Мария', personId: 3 }),
+    view('sale:6', { contact: 'С суммой', amount: rub(900) }), // уже есть в people позицией
+    view('sale:7', { contact: 'Отменили', cancelled: true }),
+    view('buy:2', { contact: 'Не разобран', state: 'open' }),
+  ];
+  assert.equal(plain(debtsText(people, '2026-10-19', deals)!), [
+    '💸 Нам должны 3 300 ₽ + ещё 1 без суммы',
+    '• Пётр — 800 ₽',
+    '  – пост вечер · MARIN · 16.10 · 800 ₽ · 3 дн.',
+    '• Иван (@ivan) — 2 200 ₽',
+    '  – сторисы · SATAN GAMES · 17.10 · 1 500 ₽ · 2 дн.',
+    '  – приветка · 240 заявок · 18.10 · 700 ₽, оплачено 1 000 из 1 700 ₽ · 1 дн.',
+    '• без контакта — 300 ₽',
+    '  – пост день · CHANNEL · 18.10 · 300 ₽ · 1 дн.',
+    '• Мария — сумма ещё не известна',
+    '  – пост 9:00 · MARIN GAMES · 19.10 · сумма ещё не известна · сегодня',
     '',
     '🧾 Мы должны 1 200 ₽',
-    '• Админ (@admin) — 1 200 ₽ · вечер 16.10 · 3 дн.',
+    '• Админ (@admin) — 1 200 ₽',
+    '  – пост вечер · SATAN GAMES · 16.10 · 1 200 ₽ · 3 дн.',
   ].join('\n'));
 
-  assert.equal(
-    plain(debtsText([view('buy:1', { contact: '', channels: 'MARIN GAMES', amount: null, slot: 'n17' })], '2026-10-17')!),
-    '🧾 Мы должны сумма ещё не известна\n• MARIN GAMES — сумма ещё не известна · 17:00 17.10 · сегодня',
-    'нет контакта — каналы; только закупы — без блока «Нам должны»'
+  assert.match(
+    debtsText([person(1, 'Ivan <b>&', null, [item('sale:1', { what: 'пост · <i>' })])], '2026-10-19')!,
+    /Ivan &lt;b&gt;&amp; [\s\S]*пост · &lt;i&gt;/,
+    'имя и каналы из аналитики экранированы: parse_mode HTML'
   );
-  assert.match(debtsText([view('sale:1', { contact: 'Ivan <b>&' })], '2026-10-19')!, /Ivan &lt;b&gt;&amp;/, 'контакт из аналитики экранирован');
-  assert.equal(debtsText(deals.filter((d) => d.date > '2026-10-19' || d.state !== 'waiting' || d.cancelled), '2026-10-19'), null);
   assert.equal(debtsText([], '2026-10-19'), null);
+});
+
+/**
+ * Напоминание — о том, что уже долг: реклама, которая ещё не вышла, — пока не
+ * долг, хотя в personDebts она уже позиция. Её нет ни в строке, ни в сумме
+ * человека, ни во взаимозачёте.
+ */
+test('текст долгов: будущие позиции не в счёт — ни в сумме человека, ни во взаимозачёте', () => {
+  const people = [
+    person(1, 'Иван', 'ivan', [
+      item('sale:1', { date: '2026-10-17', amount: rub(1500), remaining: rub(1500) }),
+      item('sale:2', { date: '2026-10-25', amount: rub(900), remaining: rub(900) }),
+      item('buy:3', { date: '2026-10-22', amount: rub(400), remaining: rub(400) }),
+    ]),
+  ];
+  assert.equal(plain(debtsText(people, '2026-10-19')!), '💸 Нам должны 1 500 ₽\n• Иван (@ivan) — 1 500 ₽\n  – сторисы · SATAN GAMES · 17.10 · 1 500 ₽ · 2 дн.');
+  assert.equal(debtsText(people, '2026-10-16'), null, 'ничего ещё не наступило — напоминать не о чем');
+  assert.equal(
+    debtsText([], '2026-10-19', [view('sale:5', { date: '2026-10-20', contact: 'Мария' })]),
+    null,
+    'CPM на завтра — тоже ещё не долг'
+  );
+});
+
+/**
+ * Аванс и взаимозачёт — то, что владелец делает на странице, но узнать о них
+ * должен из напоминания: «у Олега наш аванс» и «с Иваном можно закрыть
+ * встречные долги без денег».
+ */
+test('текст долгов: аванс, взаимозачёт по встречным долгам, CPM у своего человека', () => {
+  const people = [
+    person(1, 'Иван', 'ivan', [
+      item('sale:1', { date: '2026-10-15', amount: rub(1500), remaining: rub(1500) }),
+      item('buy:2', { date: '2026-10-16', what: 'пост утро · IVAN CH', amount: rub(500), remaining: rub(500) }),
+    ]),
+    person(2, 'Олег', null, [item('buy:4', { date: '2026-10-17', what: 'пост ночь · OLEG', amount: rub(700), remaining: rub(700) })], { advanceIn: rub(300) }),
+    person(3, 'Сергей', null, [item('sale:6', { date: '2026-10-18', amount: rub(250), remaining: rub(250) })], { advanceOut: rub(100) }),
+  ];
+  const deals = [view('buy:9', { date: '2026-10-18', slot: 'stories', channels: 'OLEG', contact: 'Олег', personId: 2 })];
+  assert.equal(plain(debtsText(people, '2026-10-19', deals)!), [
+    '💸 Нам должны 1 750 ₽',
+    '• Иван (@ivan) — 1 500 ₽ · можно взаимозачёт на 500 ₽',
+    '  – сторисы · SATAN GAMES · 15.10 · 1 500 ₽ · 4 дн.',
+    '• Сергей — 250 ₽ · наш аванс 100 ₽',
+    '  – сторисы · SATAN GAMES · 18.10 · 250 ₽ · 1 дн.',
+    '',
+    '🧾 Мы должны 1 200 ₽ + ещё 1 без суммы',
+    '• Иван (@ivan) — 500 ₽ · можно взаимозачёт на 500 ₽',
+    '  – пост утро · IVAN CH · 16.10 · 500 ₽ · 3 дн.',
+    '• Олег — 700 ₽ + 1 без суммы · его аванс 300 ₽',
+    '  – пост ночь · OLEG · 17.10 · 700 ₽ · 2 дн.',
+    '  – сторисы · OLEG · 18.10 · сумма ещё не известна · 1 дн.',
+  ].join('\n'));
+
+  // без контакта платить можно, только указав человека: взаимозачёта у такой группы нет
+  const orphans = person(null, 'без контакта', null, [item('sale:1', { remaining: rub(100), amount: rub(100) }), item('buy:2', { remaining: rub(100), amount: rub(100) })]);
+  assert.doesNotMatch(debtsText([orphans], '2026-10-19')!, /взаимозачёт/);
 });
 
 test('пора ли напоминать: с 10:00 МСК, раз в сутки', () => {
@@ -87,7 +173,7 @@ test('напоминание: в 10:00 — каждому владельцу с 
   assert.equal(await bot.remind(10), true);
   assert.deepEqual(tg.calls.map((c) => c.params.chat_id), ['777000', '888000'], 'каждому владельцу');
   const sent = tg.calls[0]!;
-  assert.equal(plain(sent.params.text), '💸 Нам должны 1 500 ₽\n• Иван (@ivan) — 1 500 ₽ · сторисы 17.10 · 2 дн.', 'закуп на 21.10 ещё не долг');
+  assert.equal(plain(sent.params.text), '💸 Нам должны 1 500 ₽\n• Иван (@ivan) — 1 500 ₽\n  – сторисы · SATAN GAMES · 17.10 · 1 500 ₽ · 2 дн.', 'закуп на 21.10 ещё не долг');
   assert.deepEqual(sent.params.reply_markup, { inline_keyboard: [[{ text: 'Открыть «Деньги»', url: 'https://dengi.routaterm.icu' }]] });
   assert.equal(lastReminderDay(db), at(19, 0), 'день — полночь по Москве, в import_state');
 
@@ -139,8 +225,23 @@ test('/debts — те же долги по запросу; пусто — «ни
   setWaiting(db, 'buy:4', true, at(19, 9));
   await bot.handleUpdate(message(777000, '/debts'));
   const c = tg.calls.at(-1)!;
-  assert.equal(plain(c.params.text), '🧾 Мы должны 1 200 ₽\n• Админ (@admin) — 1 200 ₽ · вечер 16.10 · 3 дн.');
+  assert.equal(plain(c.params.text), '🧾 Мы должны 1 200 ₽\n• Админ (@admin) — 1 200 ₽\n  – пост вечер · 16.10 · 1 200 ₽ · 3 дн.');
   assert.equal(c.params.reply_markup.inline_keyboard[0][0].url, 'https://dengi.routaterm.icu');
+
+  // Тот же человек в приветке — тот же человек в долгах: фиксация встаёт под
+  // его строку рядом с закупом, и бот подсказывает взаимозачёт.
+  const w = createWelcome(db, { contact: '@admin', price: '5', startedOn: '2026-10-01' }, at(19, 9));
+  fixWelcome(db, w, { total: 100, onDate: '2026-10-18' }, at(19, 9));
+  await bot.handleUpdate(message(777000, '/debts'));
+  assert.equal(plain(tg.calls.at(-1)!.params.text), [
+    '💸 Нам должны 500 ₽',
+    '• Админ (@admin) — 500 ₽ · можно взаимозачёт на 500 ₽',
+    '  – приветка · 100 заявок · 18.10 · 500 ₽ · 1 дн.',
+    '',
+    '🧾 Мы должны 1 200 ₽',
+    '• Админ (@admin) — 1 200 ₽ · можно взаимозачёт на 500 ₽',
+    '  – пост вечер · 16.10 · 1 200 ₽ · 3 дн.',
+  ].join('\n'));
 });
 
 test('REMINDER_HOUR и PUBLIC_URL: по умолчанию 10:00 и без кнопки; off, час, https', () => {

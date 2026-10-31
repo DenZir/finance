@@ -298,6 +298,88 @@ tr.total td { font-weight: 700; border-bottom: 0; border-top: 1px solid var(--li
 .wdeal summary { cursor: pointer; }
 .wdeal details .deal { opacity: .8; }
 
+/* текущая ссылка размещения и история ссылок */
+.wd-who { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.wd-who:hover { color: var(--accent); }
+.wd-cur { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(87,182,255,.04); font-size: 12px; color: var(--muted); }
+.wd-cur span + span::before { content: '·'; margin-right: 14px; color: var(--dim); }
+.wd-cur b { color: var(--text); font: 600 12px var(--mono); }
+.wdeal details.wd-links { margin-top: 8px; }
+/* «Это новая ссылка?» — вопрос, а не ошибка */
+.ask { margin-top: 12px; padding: 11px 12px; border: 1px solid rgba(255,180,84,.35); border-radius: 11px; background: rgba(255,180,84,.07); font-size: 12.5px; line-height: 1.5; }
+.ask-b { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ============ ЛЮДИ ============ */
+.chip.ok { color: var(--green); background: rgba(61,220,151,.09); border-color: rgba(61,220,151,.28); }
+.adv { color: var(--violet); }
+.link-ic { border: 0; background: none; padding: 0 0 0 6px; color: var(--dim); font: 500 11px var(--body); cursor: pointer; }
+.link-ic:hover { color: var(--accent); }
+.deal .what small .link { font-weight: 500; font-size: 11.5px; text-align: left; }
+.prow { display: grid; grid-template-columns: 34px minmax(0, 1fr) 128px 128px 104px; gap: 12px; align-items: center; width: calc(100% + 24px); margin: 0 -12px; padding: 10px 12px; border: 0; border-bottom: 1px solid rgba(255,255,255,.045); border-radius: 0; background: none; color: var(--text); text-align: left; transition: background .16s, box-shadow .16s; }
+.prow:hover { background: rgba(87,182,255,.045); box-shadow: inset 2.5px 0 0 var(--accent); }
+.prow .ava { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font: 700 13px var(--mono); color: #CBBFFF; background: linear-gradient(145deg, rgba(155,140,255,.24), rgba(87,182,255,.14)); border: 1px solid rgba(155,140,255,.25); }
+.prow.orphan .ava { color: var(--dim); background: rgba(255,255,255,.04); border-color: var(--line); }
+.pr-who { min-width: 0; }
+.pr-who b { display: block; font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-who small { display: block; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.pr-v { text-align: right; font: 600 13px var(--mono); white-space: nowrap; }
+.pr-v small { display: block; color: var(--dim); font: 400 10px var(--body); letter-spacing: .04em; }
+.pr-v.zero > span { color: var(--dim); font-weight: 400; }
+.people-rest { margin-top: 14px; }
+.people-rest summary, .pp-done summary { cursor: pointer; font: 600 10px var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--dim); padding: 4px 0; }
+.people-rest summary:hover, .pp-done summary:hover { color: var(--muted); }
+
+/* карточка человека */
+.dlg.dlg-person { width: min(760px, calc(100vw / var(--z) - 32px)); }
+.dlg-body { padding: 18px 20px 20px; }
+.pp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.pp-head h3 { font: 700 18px var(--body); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.pp-head .mono { font-size: 12px; }
+.pp-tots { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; }
+.pp-box { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.025); min-width: 0; }
+.pp-box .kpi-lbl { font-size: 10px; }
+.pp-box b { font: 600 18px/1.2 var(--mono); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.pp-box small { color: var(--dim); font-size: 11px; }
+.pp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 14px 0 4px; }
+.pp-sel { color: var(--muted); font-size: 12px; }
+.pp-sel .link { font-size: 12px; }
+.pp-orphan { margin: 14px 0 0; }
+.dlg-body .ads-h { margin-top: 18px; }
+.pp-it .what small { display: flex; flex-wrap: wrap; align-items: baseline; }
+.pp-it .acts { flex-direction: column; align-items: flex-end; gap: 4px; }
+.pp-it .acts small, .wdeal .deal .acts small { color: var(--dim); font: 400 10.5px var(--mono); }
+.pp-it.done { opacity: .6; }
+.pp-done { margin-top: 10px; }
+.op.pp-pay { align-items: start; }
+.pp-parts { list-style: none; margin: 5px 0 0; padding: 0; display: grid; gap: 2px; max-width: 440px; }
+.pp-parts li { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--muted); padding-left: 10px; border-left: 2px solid var(--line2); }
+.pp-parts li span { min-width: 0; overflow-wrap: anywhere; }
+.pp-parts b { font: 500 11px var(--mono); color: var(--text); white-space: nowrap; }
+
+/* «Оплачено» у человека: что закроется — до записи */
+.seg.ppay-dir { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
+.pv { margin-top: 14px; display: grid; gap: 4px; }
+.pv:empty { display: none; }
+.pv .hint { margin: 0; }
+.pv-h { font: 600 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 4px 0 2px; }
+.pv-r { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.03); border: 1px solid var(--line); font-size: 12px; }
+.pv-t { font: 600 10px var(--body); letter-spacing: .06em; text-transform: uppercase; }
+.pv-w { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.pv-r b { font: 600 12px var(--mono); white-space: nowrap; }
+.pv-r.ok .pv-t { color: var(--green); }
+.pv-r.part .pv-t { color: var(--amber); }
+.pv-r.part { border-color: rgba(255,180,84,.28); }
+.pv-r.wait .pv-t { color: var(--dim); }
+.pv-r.adv .pv-t { color: var(--violet); }
+.pv-r.adv { border-color: rgba(155,140,255,.3); }
+
+/* правка человека: объединить */
+.merge { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.merge h4 { font: 600 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+.merge-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.merge select { width: 100%; min-width: 0; background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 9px; color: var(--text); padding: 8px 11px; font: 500 13px var(--body); }
+.merge select option { background: #121824; }
+
 /* ============ ВИДЫ И ПРОЕКТЫ ============ */
 .dlg.dlg-wide { width: min(560px, calc(100vw / var(--z) - 32px)); }
 .cat-wrap { padding: 18px 20px 20px; }
@@ -438,6 +520,23 @@ tr.total td { font-weight: 700; border-bottom: 0; border-top: 1px solid var(--li
   .deal .acts { grid-column: 1 / -1; justify-content: flex-start; }
   .recent .op { grid-template-columns: minmax(0, 1fr) auto; }
   .todo-it { margin: 0 -14px; width: calc(100% + 28px); padding: 10px 14px; }
+  /* суммы — столбиком справа, нулевые не показываем */
+  .prow { grid-template-columns: 34px minmax(0, 1fr) auto; margin: 0 -14px; width: calc(100% + 28px); padding: 10px 14px; row-gap: 4px; }
+  .prow .ava { grid-row: 1 / span 3; align-self: start; }
+  .prow .pr-who { grid-row: 1 / span 3; align-self: start; }
+  .prow .pr-v { grid-column: 3; }
+  .prow .pr-v.zero { display: none; }
+  .dlg-body { padding: 16px 14px 18px; }
+  .pp-tots { grid-auto-flow: row; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pp-box b { font-size: 15px; }
+  .pp-box:nth-child(3) { grid-column: 1 / -1; }
+  .pp-it .acts { flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: flex-start; }
+  .pv-r { grid-template-columns: minmax(0, 1fr) auto; }
+  .pv-r .pv-w { grid-column: 1 / -1; grid-row: 2; }
+  .wd-cur span + span::before { content: none; }
+  .wd-cur { gap: 2px 12px; }
+  /* «оплачено 1 000 ₽ из 1 700 ₽» под суммой не отнимает строку у названия */
+  .deal .sum small { white-space: normal; max-width: 112px; margin-left: auto; }
   .inc-total b { font-size: 24px; }
   .iday { grid-template-columns: 64px 1fr auto; gap: 8px; }
   .iday-d { padding-left: 72px; }

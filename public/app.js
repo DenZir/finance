@@ -26,11 +26,17 @@ let recurringEdit = null; // регулярный в окне правки; null
 let welcomeEdit = null; // размещение в окне правки; null — новое
 let fixDealId = null;
 let picked = new Set(); // сделки, выбранные для отметки списком; живут до следующей отрисовки
-let people = []; // «Оплатить у человека»: его неоплаченные места одного вида
 let vpnRows = []; // оплаты VPN без платёжки
 let vpnSkipped = []; // отмеченные «Не учитывать»
 let vpnPicked = new Set();
 let partnerRows = []; // расчёт с партнёром по проектам (VPN)
+// Долги по людям (владелец, 2026-10-31): один человек — и реклама, и приветка
+let peopleRows = []; // GET /api/people: сначала с долгом, «без контакта» — последней группой
+let personCard = null; // открытая карточка: { p, sel: Set<ref> } — галочки для «Оплачено»
+let ppay = null; // окно «Оплачено» у человека: { p, dir, refs }
+let linkDealId = null; // «Новая ссылка» приветки
+let dealPersonRef = null; // «Чья сделка»
+let personEditId = null; // окно правки человека; null — новый
 
 function monthOf(ms) {
   const d = new Date(ms + MSK);
@@ -62,7 +68,12 @@ async function api(path, init = {}) {
     throw new Error('нужно войти');
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `ошибка ${res.status}`);
+  if (!res.ok) {
+    // code — когда сервер предлагает действие (new_link: «Это новая ссылка?»)
+    const err = new Error(body.error || `ошибка ${res.status}`);
+    err.code = body.code;
+    throw err;
+  }
   return body;
 }
 
@@ -115,6 +126,7 @@ window.addEventListener('hashchange', () => {
 // Раздел — в адресе (#ads), чтобы «Назад» в браузере и обновление страницы вели туда же.
 const SCREENS = {
   overview: ['Обзор', 'Деньги проектов: доход, долги и что ждёт действия'],
+  people: ['Люди', 'Кто кому должен — реклама и приветка одного человека вместе'],
   ads: ['Реклама', 'Сделки из аналитики: оплачено, ждём оплату, бартер'],
   welcome: ['Приветка', 'Чужие ссылки в приветке и оплата за заявки'],
   recurring: ['Регулярные расходы', 'Серверы и подписки: в свой день бот присылает черновик'],
@@ -124,7 +136,7 @@ const SCREENS = {
   report: ['Итоги', 'Доходы, комиссии и расходы по видам — за месяц или год'],
   ops: ['Операции', 'Всё, что записано: руками, ботом и импортом'],
 };
-const IN_MORE = ['welcome', 'vpn', 'partner', 'wallets', 'report']; // на телефоне — в «Ещё»
+const IN_MORE = ['people', 'welcome', 'vpn', 'partner', 'wallets', 'report']; // на телефоне — в «Ещё»
 let screen = 'overview';
 const screenOfHash = () => (SCREENS[location.hash.slice(1)] ? location.hash.slice(1) : 'overview');
 
@@ -217,7 +229,9 @@ function renderTiles(report) {
   const all = S.totals.onProviders + S.totals.onWallets;
   const share = (v) => (all > 0 ? Math.max(0, Math.min(100, (v / all) * 100)) : 0);
   const count = (pred) => S.wallets.filter((w) => !w.archived && pred(w)).length;
-  const owedUs = S.ads.owedToUs + S.welcome.owed;
+  const D = S.debts;
+  const owedUs = D.owedToUs;
+  const deb = debtCounts();
   // «Если всё оплачено» — к итогам периода долги из ленты дохода, как в блоке «Доход»
   const ahead = inc.assume ? incomeRows.filter((r) => r.expected) : [];
   const aheadIncome = ahead.reduce((s, r) => s + (r.kind === 'income' ? r.gross : 0), 0);
@@ -236,15 +250,15 @@ function renderTiles(report) {
     { lbl: period === 'year' ? 'Чистыми за год' : 'Чистыми за месяц', icon: IC.rub, c: report.net >= 0 ? C.green : C.red, val: rub(report.net), cls: report.net >= 0 ? 'good' : 'bad',
       delta: report.totalIncome ? `<span class="delta ${report.net >= 0 ? 'up' : 'dn'}">${Math.round((report.net / report.totalIncome) * 100)}% дохода</span>` : '<span class="delta flat">нет дохода</span>',
       sub: inc.assume ? `если всё оплатят${aheadNet ? `: ${aheadNet > 0 ? '+' : '−'}${rub(Math.abs(aheadNet))} долгами` : ' — долгов нет'}` : 'доход − комиссии − расходы', spark: netSeries() },
-    { lbl: 'Нам должны', icon: IC.in, c: C.amber, val: rub(owedUs), cls: owedUs ? 'warn' : '',
-      delta: `<span class="delta ${owedUs ? 'warn' : 'flat'}">${S.ads.owedToUsCount + S.welcome.count || 'никто'}</span>`,
-      sub: [S.ads.owedToUsCount ? `реклама: ${S.ads.owedToUsCount}` : '', S.welcome.count ? `приветка: ${S.welcome.count}` : ''].filter(Boolean).join(' · ') || 'никто не должен' },
-    { lbl: 'Мы должны', icon: IC.out, c: C.red, val: rub(S.ads.weOwe), cls: S.ads.weOwe ? 'warn' : '',
-      delta: `<span class="delta ${S.ads.weOwe ? 'dn' : 'flat'}">${S.ads.weOweCount || 'никому'}</span>`,
-      sub: S.ads.weOweCount ? `надо оплатить закупы: ${S.ads.weOweCount}` : 'никому не должны' },
+    { lbl: 'Нам должны', icon: IC.in, c: C.amber, val: rub(owedUs), cls: owedUs ? 'warn' : '', scr: 'people',
+      delta: `<span class="delta ${owedUs ? 'warn' : 'flat'}">${deb.inPeople ? persons(deb.inPeople) : 'никто'}</span>`,
+      sub: [deb.inAds ? `реклама: ${deb.inAds}` : '', deb.inWelcome ? `приветка: ${deb.inWelcome}` : ''].filter(Boolean).join(' · ') || 'никто не должен' },
+    { lbl: 'Мы должны', icon: IC.out, c: C.red, val: rub(D.weOwe), cls: D.weOwe ? 'warn' : '', scr: 'people',
+      delta: `<span class="delta ${D.weOwe ? 'dn' : 'flat'}">${deb.outPeople ? persons(deb.outPeople) : 'никому'}</span>`,
+      sub: D.weOweCount ? `надо оплатить закупы: ${D.weOweCount}` : 'никому не должны' },
   ];
   $('#tiles').innerHTML = tiles
-    .map((k) => `<article class="card kpi"${k.scr ? ` data-scr="${k.scr}" title="Открыть раздел"` : ''}>
+    .map((k) => `<article class="card kpi"${k.scr ? ` data-scr="${k.scr}" title="Открыть «${esc(SCREENS[k.scr][0])}»"` : ''}>
       <div class="kpi-top"><span class="kpi-ic" style="${hueBox(k.c)}">${k.icon}</span><span class="kpi-lbl">${k.lbl}</span>${k.delta}</div>
       <div class="kpi-val ${k.cls ?? ''}">${k.val}</div>
       <div class="kpi-sub">${k.sub}</div>
@@ -256,14 +270,14 @@ function renderTiles(report) {
 // «Что ждёт действия» на обзоре: каждая строка ведёт в свой раздел
 function renderTodo() {
   const unsorted = deals.filter((d) => d.state === 'open' && !d.cancelled).length;
+  const deb = debtCounts();
   const due = recurringRows.filter((r) => r.active && r.state === 'due');
   const vpnSum = vpnRows.reduce((s, p) => s + p.amount, 0);
   const n = (k, one, few, many) => `${k} ${plural(k, one, few, many)}`;
   const items = [
-    S.ads.owedToUsCount && ['ads', IC.in, C.green, 'Реклама — ждём оплату', n(S.ads.owedToUsCount, 'продажа', 'продажи', 'продаж'), `<span class="plus">+${rub(S.ads.owedToUs)}</span>`],
-    S.ads.weOweCount && ['ads', IC.out, C.red, 'Реклама — надо оплатить', n(S.ads.weOweCount, 'закуп', 'закупа', 'закупов'), `<span class="minus">−${rub(S.ads.weOwe)}</span>`],
+    S.debts.owedToUs && ['people', IC.in, C.green, 'Нам должны', [deb.inPeople ? persons(deb.inPeople) : '', deb.inAds ? `реклама: ${deb.inAds}` : '', deb.inWelcome ? `приветка: ${deb.inWelcome}` : ''].filter(Boolean).join(' · '), `<span class="plus">+${rub(S.debts.owedToUs)}</span>`],
+    S.debts.weOwe && ['people', IC.out, C.red, 'Мы должны — закупы', [deb.outPeople ? persons(deb.outPeople) : '', n(S.debts.weOweCount, 'закуп', 'закупа', 'закупов')].filter(Boolean).join(' · '), `<span class="minus">−${rub(S.debts.weOwe)}</span>`],
     unsorted && ['ads', IC.ads, C.blue, 'Сделки не разобраны', 'оплачено, ждём оплату или бартер', String(unsorted)],
-    S.welcome.count && ['welcome', IC.welcome, C.amber, 'Приветка — должны за заявки', n(S.welcome.count, 'фиксация', 'фиксации', 'фиксаций'), `<span class="plus">+${rub(S.welcome.owed)}</span>`],
     due.length && ['recurring', IC.recurring, C.violet, 'Регулярные — ждут записи', due.slice(0, 3).map((r) => esc(r.name)).join(', ') + (due.length > 3 ? '…' : ''), `≈ ${rub(due.reduce((s, r) => s + (r.rubEstimate ?? 0), 0))}`],
     vpnRows.length && ['vpn', IC.vpn, C.blue, 'VPN — без платёжки', n(vpnRows.length, 'оплата', 'оплаты', 'оплат'), `<span class="plus">+${rub(vpnSum)}</span>`],
   ].filter(Boolean);
@@ -277,10 +291,12 @@ function renderBadges() {
   const n = {
     ads: deals.filter((d) => (d.state === 'waiting' || d.state === 'open') && !d.cancelled).length,
     welcome: S.welcome.count,
+    people: S.debts.people,
     recurring: recurringRows.filter((r) => r.active && r.state === 'due').length,
     vpn: vpnRows.length,
   };
-  n.more = n.welcome + n.vpn;
+  // приветка с долгом — тоже чей-то долг в «Людях»: не считаем дважды
+  n.more = n.people + n.vpn;
   for (const el of document.querySelectorAll('[data-nb]')) {
     const v = n[el.dataset.nb] || 0;
     el.hidden = !v;
@@ -307,48 +323,49 @@ const pickable = (d) => (d.state === 'open' || d.state === 'waiting') && !d.canc
 const payable = (d) => pickable(d) && d.amount != null && d.amount > 0;
 const places = (n) => `${n} ${plural(n, 'место', 'места', 'мест')}`;
 
-// Люди, у которых два и больше неоплаченных места одного вида: за них платят
-// одним переводом (владелец, 2026-10-22). Продажи и закупы — отдельно.
+// «Оплатить у человека»: у кого долг по рекламе и не одна позиция — платят одним
+// переводом, а сумма закрывает его позиции по порядку даты (владелец, 2026-10-31).
+// Платят в карточке человека: там видно и приветку, и встречный закуп.
 function peopleToPay() {
-  const by = new Map();
-  for (const d of deals) {
-    if (!pickable(d) || !d.contact.trim()) continue;
-    const key = `${d.kind}\u0000${d.contact.trim()}`;
-    if (!by.has(key)) by.set(key, { kind: d.kind, contact: d.contact.trim(), list: [] });
-    by.get(key).list.push(d);
-  }
-  return [...by.values()]
-    .filter((p) => p.list.filter(payable).length >= 2)
-    .sort((a, b) => a.list[0].date.localeCompare(b.list[0].date));
+  return peopleRows.filter((p) => p.personId !== null && p.items.some((i) => i.source === 'ads' && i.remaining > 0) && p.items.filter((i) => i.remaining > 0).length >= 2);
 }
 
-function personLine(p, i) {
-  const ok = p.list.filter(payable);
-  const sum = ok.reduce((s, d) => s + d.amount, 0);
-  const noSum = p.list.length - ok.length;
-  const days = [...new Set(ok.map((d) => dealDay(d.date)))];
-  const sub = [`${p.kind === 'sale' ? 'продажи' : 'закупы'}: ${places(ok.length)}`, days.length > 3 ? `${days[0]}–${days.at(-1)}` : days.join(', '), noSum ? `ещё ${noSum} без суммы` : ''].filter(Boolean).join(' · ');
-  return `<div class="deal person"><span class="when">${p.kind === 'sale' ? 'от него' : 'ему'}</span>
-    <div class="what"><b>${esc(p.contact)}</b><small>${sub}</small></div>
-    <div class="sum"><span class="${p.kind === 'sale' ? 'plus' : 'minus'}">${p.kind === 'sale' ? '+' : '−'}${rub(sum)}</span></div>
-    <div class="acts"><button class="btn btn-primary" type="button" data-pay-person="${i}">Оплатить всё</button></div></div>`;
+function personLine(p) {
+  const open = p.items.filter((i) => i.remaining > 0);
+  const n = (src) => open.filter((i) => i.source === src).length;
+  const sub = [n('ads') ? `реклама: ${places(n('ads'))}` : '', n('welcome') ? `приветка: ${n('welcome')}` : '', p.advanceIn || p.advanceOut ? `аванс ${rub(p.advanceIn + p.advanceOut)}` : ''].filter(Boolean).join(' · ');
+  const sum = [p.owedToUs ? `<span class="plus">+${rub(p.owedToUs)}</span>` : '', p.weOwe ? `<span class="minus">−${rub(p.weOwe)}</span>` : ''].filter(Boolean).join('<br>');
+  return `<div class="deal person"><span class="when">человек</span>
+    <div class="what"><b>${esc(personName(p))}</b><small>${sub}</small></div>
+    <div class="sum">${sum}</div>
+    <div class="acts"><button class="btn btn-primary" type="button" data-person-open="${p.personId}">Оплатить у человека</button></div></div>`;
 }
+
+const dealCovered = (d) => (d.state === 'waiting' && d.amount != null && d.remaining > 0 && d.remaining < d.amount ? d.amount - d.remaining : 0);
 
 // group — в какой группе строка («Ждём оплату», «Не разобраны»); без группы («Все сделки») выбора нет
 function dealLine(d, group) {
-  const sum = d.amount == null ? '<span class="muted">суммы ещё нет</span>' : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(d.amount)}</span>`;
+  // покрыто — деньгами или авансом человека; оставшееся висит долгом
+  const covered = dealCovered(d);
+  const part = d.paid > 0 && d.remaining > 0;
+  const sum = d.amount == null
+    ? '<span class="muted">суммы ещё нет</span>'
+    : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(covered ? d.remaining : d.amount)}</span>${covered ? `<small>${d.paid ? 'оплачено' : 'аванс покрыл'} ${rub(covered)} из ${rub(d.amount)}</small>` : ''}`;
   const ref = esc(d.ref);
   const waitLabel = d.kind === 'sale' ? 'Ждём оплату' : 'Надо оплатить';
   let acts;
-  if (d.state === 'paid') acts = `<span class="chip">оплачено</span>${d.cancelled ? ' <span class="chip warn">отменена в аналитике</span>' : ''}`;
+  if (d.state === 'paid') acts = `<span class="chip ${d.closed ? '' : 'ok'}">${d.closed ? 'прощено' : 'оплачено'}</span>${d.cancelled ? ' <span class="chip warn">отменена в аналитике</span>' : ''}`;
   else if (d.state === 'barter') acts = `<span class="chip">бартер</span><button class="btn ghost" type="button" data-unbarter="${ref}">Вернуть</button>`;
   else if (d.cancelled) acts = `<span class="chip">отменена</span>${d.state === 'waiting' ? `<button class="btn ghost" type="button" data-unwait="${ref}">Не ждём</button>` : ''}`;
+  else if (d.state === 'waiting' && part)
+    // часть денег уже пришла — это не бартер и не «не разобрана»: снять — удалив оплату в карточке человека
+    acts = `<span class="chip warn">частично</span><button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button>`;
   else if (d.state === 'waiting')
     acts = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-barter="${ref}">Бартер</button><button class="btn ghost" type="button" data-unwait="${ref}" title="Вернуть в неразобранные">×</button>`;
   else
     acts = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
   const done = d.state === 'paid' || d.state === 'barter' || d.cancelled;
-  const sub = [esc(d.contact), esc(d.channels), d.state === 'waiting' && !d.cancelled ? `<span class="age">${dealAge(d.date)}</span>` : ''].filter(Boolean).join(' · ');
+  const sub = [dealWho(d), esc(d.channels), d.state === 'waiting' && !d.cancelled ? `<span class="age">${dealAge(d.date)}</span>` : ''].filter(Boolean).join(' · ');
   const when = !group
     ? dealDay(d.date)
     : pickable(d)
@@ -383,7 +400,7 @@ function renderAds() {
       (list.length ? list.map((d) => dealLine(d, key)).join('') : `<div class="empty">${empty}</div>`);
   };
   const unknown = S.ads.unknown ? `<div class="ads-sum"><span>без суммы: ${S.ads.unknown} — CPM ждёт просмотров или ПДП подсчёта, в долги пока не входят</span></div>` : '';
-  people = peopleToPay();
+  const people = peopleToPay();
   const byPerson = people.length ? `<h3 class="ads-h">Оплатить у человека · ${people.length}</h3>${people.map(personLine).join('')}` : '';
   $('#ads').innerHTML =
     byPerson +
@@ -616,15 +633,48 @@ const isoDay = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const plural = (n, one, few, many) => (n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many);
 const reqs = (n) => `${n.toLocaleString('ru-RU')} ${plural(n, 'заявка', 'заявки', 'заявок')}`;
 
+// Статус позиции долга — одинаково в приветке и в карточке человека.
+// paid — деньгами (₽-микро, число), advance — покрыто авансом человека.
+function debtStatus(it) {
+  const got = it.paid + it.advance;
+  if (it.state === 'closed') return `<span class="chip">прощено</span>${got ? `<small>оплачено ${rub(got)} из ${rub(it.amount)}</small>` : ''}`;
+  if (it.state === 'paid') return it.advance && !it.paid ? '<span class="chip ok">аванс покрыл</span>' : `<span class="chip ok">оплачено</span>${it.advance ? '<small>с авансом</small>' : ''}`;
+  if (it.state === 'partial') return `<span class="chip warn">${it.paid ? `оплачено ${rub(got)} из ${rub(it.amount)}` : `аванс покрыл ${rub(got)} из ${rub(it.amount)}`}</span>`;
+  return `<span class="chip warn">${it.dir === 'out' ? 'надо оплатить' : 'ждём'}</span>`;
+}
+
+// ссылка размещения — «ссылка 2» или её подпись; у единственной — ничего
+const linkName = (d, linkId) => {
+  if (d.links.length < 2) return '';
+  const i = d.links.findIndex((l) => l.id === linkId);
+  return i < 0 ? '' : d.links[i].label || `ссылка ${i + 1}`;
+};
+
 function fixLine(d, f, last) {
-  const sum = f.amount ? `<span class="plus">+${rub(f.amount)}</span>` : '<span class="muted">0 ₽</span>';
-  const acts = f.paid
-    ? `<span class="chip">${f.amount ? 'оплачено' : 'новых нет'}</span>`
-    : `<button class="btn btn-primary" type="button" data-wpay="${f.id}">Оплачено</button>`;
-  const del = last && !(f.paid && f.amount) ? `<button class="btn ghost" type="button" data-wfixdel="${f.id}" title="Удалить фиксацию">×</button>` : '';
+  const sum = f.amount
+    ? `<span class="plus">+${rub(f.remaining && f.remaining < f.amount ? f.remaining : f.amount)}</span>${f.remaining && f.remaining < f.amount ? `<small>из ${rub(f.amount)}</small>` : ''}`
+    : '<span class="muted">0 ₽</span>';
+  const status = f.amount ? debtStatus({ ...f, dir: 'in' }) : '<span class="chip">новых нет</span>';
+  // удалить можно последнюю и без денег: следующие посчитаны от неё
+  const del = last && !f.paid ? `<button class="btn ghost" type="button" data-wfixdel="${f.id}" title="Удалить фиксацию">×</button>` : '';
+  const link = linkName(d, f.linkId);
   return `<div class="deal"><span class="when">${isoDay(f.onDate)}</span>
-    <div class="what"><b>+${reqs(f.count)}</b><small>всего ${f.total.toLocaleString('ru-RU')}</small></div>
-    <div class="sum">${sum}</div><div class="acts">${acts}${del}</div></div>`;
+    <div class="what"><b>+${reqs(f.count)}</b><small>всего по ссылке ${f.total.toLocaleString('ru-RU')}${link ? ` · ${esc(link)}` : ''}</small></div>
+    <div class="sum">${sum}</div><div class="acts">${status}${del}</div></div>`;
+}
+
+function linksHistory(d) {
+  if (d.links.length < 2) return '';
+  const rows = d.links
+    .map((l, i) => {
+      const cur = l.id === d.current.id;
+      const del = !l.fixes && d.links.length > 1 ? `<button class="btn ghost" type="button" data-wlinkdel="${l.id}" title="Удалить ссылку, заведённую по ошибке">×</button>` : '';
+      return `<div class="deal"><span class="when">с ${isoDay(l.startedOn)}</span>
+        <div class="what"><b>${esc(l.label || `Ссылка ${i + 1}`)}</b><small>${rub(l.price)} за заявку · фиксаций: ${l.fixes}</small></div>
+        <div class="sum">${reqs(l.total)}</div><div class="acts">${cur ? '<span class="chip ok">текущая</span>' : ''}${del}</div></div>`;
+    })
+    .join('');
+  return `<details class="wd-links"><summary>Ссылки · ${d.links.length}</summary>${rows}</details>`;
 }
 
 function renderWelcome() {
@@ -635,15 +685,22 @@ function renderWelcome() {
   $('#welcome').innerHTML = welcomeRows
     .map((d) => {
       const lastId = d.fixes.length ? d.fixes[d.fixes.length - 1].id : null;
-      const open = d.fixes.filter((f) => !f.paid);
-      const done = d.fixes.filter((f) => f.paid);
+      // ждём — что ещё не закрыто; оплаченные, прощённые и пустые — свёрнуто
+      const open = d.fixes.filter((f) => f.remaining > 0);
+      const done = d.fixes.filter((f) => !(f.remaining > 0));
       const state = d.stoppedOn ? `<span class="chip warn">остановлено ${isoDay(d.stoppedOn)}</span>` : `<span class="chip">идёт с ${isoDay(d.startedOn)}</span>`;
+      const who = d.personId != null ? `<button class="link wd-who" type="button" data-person-open="${d.personId}" title="Карточка человека">${esc(d.contact)}</button>` : `<b>${esc(d.contact)}</b>`;
+      const cur = d.current;
+      const curName = d.links.length > 1 ? esc(cur.label || `ссылка ${d.links.length}`) : 'ссылка';
+      const curLine = `<div class="wd-cur"><span>${curName} с ${isoDay(cur.startedOn)}</span><span>${rub(cur.price)} за заявку</span><span>всего по ней <b>${cur.total.toLocaleString('ru-RU')}</b></span></div>`;
       return `<div class="wdeal${d.stoppedOn ? ' stopped' : ''}">
-        <div class="wd-h"><b>${esc(d.contact)}</b><span class="chip">${rub(d.price)} за заявку</span>${state}
-          <div class="wd-acts"><button class="btn btn-primary" type="button" data-wfix="${d.id}">Зафиксировать</button><button class="btn" type="button" data-wstop="${d.id}">${d.stoppedOn ? 'Возобновить' : 'Остановить'}</button><button class="btn ghost" type="button" data-wedit="${d.id}" aria-label="Изменить">✎</button></div></div>
-        <div class="wd-sum">${d.fixes.length ? `заявок всего ${d.total.toLocaleString('ru-RU')} · начислено ${rub(d.accrued)} · оплачено ${rub(d.paidSum)}${d.owed ? ` · <span class="owed">должен ${rub(d.owed)}</span>` : ''}` : 'фиксаций ещё не было'}${d.note ? ` · ${esc(d.note)}` : ''}</div>
+        <div class="wd-h">${who}${state}
+          <div class="wd-acts"><button class="btn btn-primary" type="button" data-wfix="${d.id}">Зафиксировать</button>${d.owed && d.personId != null ? `<button class="btn" type="button" data-person-open="${d.personId}" title="Оплата — в карточке человека: вместе с его рекламой">Оплатить</button>` : ''}<button class="btn" type="button" data-wlink="${d.id}">Новая ссылка</button><button class="btn" type="button" data-wstop="${d.id}">${d.stoppedOn ? 'Возобновить' : 'Остановить'}</button><button class="btn ghost" type="button" data-wedit="${d.id}" aria-label="Изменить">✎</button></div></div>
+        ${curLine}
+        <div class="wd-sum">${d.fixes.length ? `начислено ${rub(d.accrued)} · оплачено ${rub(d.paidSum)}${d.owed ? ` · <span class="owed">должен ${rub(d.owed)}</span>` : ''}` : 'фиксаций ещё не было'}${d.note ? ` · ${esc(d.note)}` : ''}</div>
         ${open.map((f) => fixLine(d, f, f.id === lastId)).join('')}
-        ${done.length ? `<details><summary>Оплаченные фиксации · ${done.length}</summary>${done.map((f) => fixLine(d, f, f.id === lastId)).join('')}</details>` : ''}
+        ${done.length ? `<details><summary>Закрытые и без новых · ${done.length}</summary>${done.map((f) => fixLine(d, f, f.id === lastId)).join('')}</details>` : ''}
+        ${linksHistory(d)}
       </div>`;
     })
     .join('');
@@ -657,9 +714,13 @@ function openWelcome(deal) {
   $('#welcomeTitle').textContent = deal ? 'Размещение в приветке' : 'Ссылка в приветке';
   f.contact.value = deal?.contact ?? '';
   f.price.value = deal ? String(deal.price / MICRO).replace('.', ',') : '';
+  $('#welcomePriceLabel').firstChild.textContent = deal && deal.links.length > 1 ? 'Цена текущей ссылки, ₽' : 'Цена за заявку, ₽';
   f.startedOn.value = deal?.startedOn ?? todayIso();
   f.startedOn.disabled = !!deal;
   f.note.value = deal?.note ?? '';
+  $('#welcomeHint').textContent = deal
+    ? 'Покупатель — знакомый из подсказки или новый: имя и @username. Цена меняется для следующих фиксаций — прошлые посчитаны по старой.'
+    : 'Покупатель — знакомый из подсказки (у него уже может быть реклама) или новый: имя и @username.';
   $('#welcomeDel').hidden = !deal;
   $('#welcomeDlg').showModal();
 }
@@ -669,37 +730,402 @@ function openFix(deal) {
   const f = $('#fixForm');
   f.reset();
   $('#fixError').hidden = true;
-  $('#fixDeal').textContent = `${deal.contact} · ${rub(deal.price)} за заявку${deal.fixes.length ? ` · в прошлый раз всего ${deal.total.toLocaleString('ru-RU')}` : ''}`;
+  $('#fixNewLink').hidden = true;
+  const c = deal.current;
+  $('#fixDeal').textContent = `${deal.contact} · ${deal.links.length > 1 ? `${c.label || `ссылка ${deal.links.length}`} ` : 'ссылка '}с ${isoDay(c.startedOn)} · ${rub(c.price)} за заявку${c.fixes ? ` · по ней в прошлый раз всего ${c.total.toLocaleString('ru-RU')}` : ''}`;
   f.onDate.value = todayIso();
   syncFix();
   $('#fixDlg').showModal();
-  f.total.focus();
+  fixInput().focus();
+}
+
+// поле зовётся value, как в API; form.value — не поле, а свойство-ловушка, поэтому по имени
+const fixInput = () => $('#fixForm [name=value]');
+
+// «340» — всего по текущей ссылке, «+120» — прибавилось (welcome.ts, fixWelcome)
+function fixValue(raw, prev) {
+  const s = String(raw ?? '').replace(/[\s ]/g, '');
+  const plus = /^\+(\d+)$/.exec(s);
+  if (plus) return { total: prev + Number(plus[1]), n: Number(plus[1]) };
+  if (/^\d+$/.test(s)) return { total: Number(s), n: Number(s) - prev };
+  return null;
 }
 
 // сколько новых и на какую сумму — пока владелец печатает число
 function syncFix() {
   const d = welcomeRows.find((x) => x.id === fixDealId);
-  const total = Number(String($('#fixForm').total.value).replace(/\s/g, ''));
-  if (!d || !Number.isInteger(total) || $('#fixForm').total.value === '') {
-    $('#fixCalc').textContent = 'Число, которое прислал покупатель, — всего с начала размещения. Долг посчитается за новые.';
+  const f = $('#fixForm');
+  const v = d && fixValue(fixInput().value, d.current.total);
+  if (!d || !v) {
+    $('#fixCalc').textContent = fixInput().value.trim() ? 'Число заявок: всего по ссылке (340) или сколько прибавилось (+120).' : 'Число, которое прислал покупатель, — всего по текущей ссылке, или «+120», если он прислал, сколько прибавилось. Долг посчитается за новые.';
+    $('#fixNewLink').hidden = true;
     return;
   }
-  const n = total - d.total;
-  $('#fixCalc').textContent = n < 0 ? `меньше прошлого (${d.total}) — так не бывает` : `новых ${reqs(n)} × ${rub(d.price)} = ${rub(n * d.price)}`;
+  if (v.n < 0) {
+    $('#fixCalc').innerHTML = `<span class="owed">Меньше прошлого: по этой ссылке было ${d.current.total.toLocaleString('ru-RU')}.</span>`;
+    askNewLink(d);
+    return;
+  }
+  $('#fixNewLink').hidden = true;
+  $('#fixCalc').innerHTML = `новых <b>${v.n.toLocaleString('ru-RU')}</b> на <b>${rub(v.n * d.current.price)}</b> · ${rub(d.current.price)} за заявку · всего по ссылке станет ${v.total.toLocaleString('ru-RU')}`;
 }
 
-function openFixPay(fixId) {
-  const d = welcomeRows.find((x) => x.fixes.some((f) => f.id === fixId));
-  const f = d?.fixes.find((x) => x.id === fixId);
-  if (!f) return;
-  showPay({
-    title: 'Приветка оплачена',
-    desc: `${d.contact} · ${reqs(f.count)} на ${isoDay(f.onDate)} · ${rub(f.amount)}`,
-    amount: f.amount,
-    amountLabel: 'Сколько пришло',
-    hint: 'Доход «Заявки с приветки», без комиссии. Сумма пересчитана по курсу — впишите, сколько пришло на самом деле.',
-    url: `/api/welcome-fix/${fixId}/pay`,
-  });
+// Заявки не убывают: меньше прошлого — покупатель сменил ссылку, и счётчик начался заново
+function askNewLink(d) {
+  const f = $('#fixForm');
+  const raw = String(fixInput().value).trim();
+  const n = Number(raw.replace(/[^\d]/g, '')) || 0;
+  $('#fixNewLinkText').innerHTML = `Это новая ссылка? Заведём её с ${f.onDate.value ? isoDay(f.onDate.value) : 'дня фиксации'} по ${rub(d.current.price)} за заявку и зафиксируем на ней ${reqs(n)} — <b>${rub(n * d.current.price)}</b>. Цену потом можно поправить в ✎.`;
+  $('#fixNewLink').hidden = false;
+}
+
+function openLink(deal) {
+  linkDealId = deal.id;
+  const f = $('#linkForm');
+  f.reset();
+  $('#linkError').hidden = true;
+  $('#linkDeal').textContent = `${deal.contact} · сейчас ${rub(deal.current.price)} за заявку, по текущей ссылке всего ${deal.current.total.toLocaleString('ru-RU')}`;
+  const last = deal.fixes.at(-1)?.onDate;
+  f.startedOn.value = last && last > todayIso() ? last : todayIso();
+  f.price.value = String(deal.current.price / MICRO).replace('.', ',');
+  $('#linkDlg').showModal();
+}
+
+// --- люди: долг по человеку целиком (владелец, 2026-10-31) -----------------------------
+// Один человек бывает должен из разных источников сразу — продал ему пост, купил у
+// него сторис, его ссылка в приветке. Позиции и оплаты — с сервера (debts.ts); здесь
+// только показ и тот же расчёт «что закроется» до записи, чтобы владелец видел его заранее.
+const personLabel = (p) => (!p.username ? p.name : p.name.toLowerCase() === `@${p.username}` ? p.name : `${p.name} (@${p.username})`);
+const personName = (p) => p.name;
+// @username рядом с именем — если имя не сам @username («@kate_ads» без имени)
+const personAt = (p) => (p.username && p.name.toLowerCase() !== `@${p.username}` ? `@${p.username}` : '');
+const persons = (n) => `${n} ${plural(n, 'человек', 'человека', 'человек')}`;
+const positions = (n) => `${n} ${plural(n, 'позиция', 'позиции', 'позиций')}`;
+const peopleById = (id) => peopleRows.find((p) => p.personId === id);
+const SRC = { ads: 'реклама', welcome: 'приветка' };
+
+// для плашек и «Что ждёт действия»: сколько людей и позиций по сторонам
+function debtCounts() {
+  const open = peopleRows.flatMap((p) => p.items.filter((i) => i.remaining > 0));
+  const ppl = (dir) => peopleRows.filter((p) => p.personId !== null && p.items.some((i) => i.dir === dir && i.remaining > 0)).length;
+  return {
+    inAds: open.filter((i) => i.dir === 'in' && i.source === 'ads').length,
+    inWelcome: open.filter((i) => i.dir === 'in' && i.source === 'welcome').length,
+    inPeople: ppl('in'),
+    outPeople: ppl('out'),
+  };
+}
+
+// Деньги — как на сервере (money.ts): копейки округляются, без плавающей точки в итогах
+const toRubC = (micro, rate) => Math.round((micro * rate) / 10_000) * 10_000;
+function parseMoney(v) {
+  const s = String(v ?? '').replace(/[\s  ]/g, '').replace(',', '.');
+  if (!/^\d+(\.\d{1,6})?$/.test(s)) return null;
+  return Math.round(Number(s) * MICRO);
+}
+const moneyStr = (micro) => String(Math.round(micro / 10_000) / 100).replace('.', ',');
+// Рубли → сумма в валюте кошелька для поля: с теми знаками, при которых она даёт
+// ровно эти рубли. С двумя знаками 1 400 ₽ по 95 — 14,74 USDT = 1 400,30 ₽: при
+// частичных оплатах это 30 копеек аванса или недоплаты на позиции.
+function fromRub(rubMicro, rate) {
+  for (let digits = 2; digits <= 6; digits++) {
+    const v = Math.round((rubMicro / MICRO / rate) * 10 ** digits) / 10 ** digits;
+    if (toRubC(Math.round(v * MICRO), rate) === rubMicro) return String(v).replace('.', ',');
+  }
+  return String(Math.round((rubMicro / MICRO / rate) * 1e6) / 1e6).replace('.', ',');
+}
+
+// Деньги по позициям по порядку: каждой — её остаток, последней — сколько хватило (debts.ts, distribute)
+function distributeC(items, total) {
+  const parts = [];
+  let left = total;
+  for (const it of items) {
+    if (left <= 0) break;
+    const r = Math.min(left, it.remaining);
+    if (r <= 0) continue;
+    parts.push({ it, rub: r });
+    left -= r;
+  }
+  return { parts, left };
+}
+
+// чей контакт в строке сделки: человек — ссылкой на карточку, ✎ — поменять
+function dealWho(d) {
+  const p = d.personId != null ? peopleById(d.personId) : null;
+  const name = p ? personLabel(p) : d.contact || '';
+  const who = d.personId != null
+    ? `<button class="link" type="button" data-person-open="${d.personId}" title="Карточка человека">${esc(name)}</button>`
+    : name ? esc(name) : '<span class="muted">без контакта</span>';
+  return `${who}<button class="link-ic" type="button" data-dperson="${esc(d.ref)}" title="Чья сделка — поменять человека" aria-label="Чья сделка">✎</button>`;
+}
+
+function renderPeople() {
+  const D = S.debts;
+  $('#peopleSum').innerHTML = D.owedToUs || D.weOwe
+    ? [D.owedToUs ? `нам должны <span class="plus">+${rub(D.owedToUs)}</span>` : '', D.weOwe ? `мы должны <span class="minus">−${rub(D.weOwe)}</span>` : '', `с долгом — ${persons(D.people)}`].filter(Boolean).join(' · ')
+    : 'Никто никому не должен';
+  if (!peopleRows.length) {
+    $('#people').innerHTML = '<div class="empty">Людей пока нет. Они появляются из контактов сделок рекламы и покупателей приветки.</div>';
+    return;
+  }
+  const row = (p) => {
+    const open = p.items.filter((i) => i.remaining > 0);
+    const n = (src) => open.filter((i) => i.source === src).length;
+    const adv = p.advanceIn + p.advanceOut;
+    const sub = [esc(personAt(p)), n('ads') ? `реклама: ${n('ads')}` : '', n('welcome') ? `приветка: ${n('welcome')}` : '', !open.length ? 'в расчёте' : ''].filter(Boolean).join(' · ');
+    const v = (val, cls, sign, lbl) => `<span class="pr-v${val ? '' : ' zero'}"><span class="${val ? cls : ''}">${val ? `${sign}${rub(val)}` : '—'}</span><small>${lbl}</small></span>`;
+    return `<button class="prow${p.personId === null ? ' orphan' : ''}" type="button" data-person-open="${p.personId ?? 'none'}">
+      <span class="ava" aria-hidden="true">${esc((p.name.replace(/^@/, '')[0] || '?').toUpperCase())}</span>
+      <span class="pr-who"><b>${esc(p.name)}</b><small>${sub}</small></span>
+      ${v(p.owedToUs, 'plus', '+', 'должен нам')}${v(p.weOwe, 'minus', '−', 'мы должны')}${v(adv, 'adv', '', 'аванс')}
+    </button>`;
+  };
+  const debt = peopleRows.filter((p) => p.owedToUs || p.weOwe);
+  const rest = peopleRows.filter((p) => !(p.owedToUs || p.weOwe));
+  const open = $('#people details')?.open ? ' open' : '';
+  $('#people').innerHTML =
+    (debt.length ? `<h3 class="ads-h">С долгом · ${debt.length}</h3>${debt.map(row).join('')}` : '<div class="empty">Долгов нет — все в расчёте.</div>') +
+    (rest.length ? `<details class="people-rest"${open}><summary>В расчёте · ${rest.length}</summary>${rest.map(row).join('')}</details>` : '');
+}
+
+// подсказка «кто это»: известные люди и контакты из сделок и приветки
+function renderPeopleDatalist() {
+  const labels = new Set([
+    ...peopleRows.filter((p) => p.personId !== null).map(personLabel),
+    ...welcomeRows.map((d) => d.contact.trim()),
+    ...deals.map((d) => d.contact.trim()),
+  ]);
+  labels.delete('');
+  $('#peopleList').innerHTML = [...labels].sort((a, b) => a.localeCompare(b, 'ru')).map((l) => `<option value="${esc(l)}"></option>`).join('');
+}
+
+// Карточка человека. keep — после записи: галочки остаются у того, что ещё ждёт
+async function openPerson(id, keep = false) {
+  const p = id === null ? peopleRows.find((x) => x.personId === null) : await api(`/api/people/${id}`);
+  if (!p) {
+    if ($('#personDlg').open) $('#personDlg').close();
+    return;
+  }
+  const sel = keep && personCard ? new Set([...personCard.sel].filter((ref) => p.items.some((i) => i.ref === ref && i.remaining > 0))) : new Set();
+  personCard = { p, sel };
+  renderPerson();
+  if (!$('#personDlg').open) $('#personDlg').showModal();
+}
+
+function renderPerson() {
+  const { p } = personCard;
+  const real = p.personId !== null;
+  $('#personName').textContent = p.name;
+  $('#personUser').textContent = personAt(p);
+  $('#personEdit').hidden = !real;
+  const live = p.items.filter((i) => i.remaining > 0);
+  const done = p.items.filter((i) => !(i.remaining > 0));
+  const cnt = (dir) => live.filter((i) => i.dir === dir).length;
+  const box = (lbl, v, cls, sub) => `<div class="pp-box"><span class="kpi-lbl">${lbl}</span><b class="${cls}">${v}</b><small>${sub}</small></div>`;
+  const adv = p.advanceIn + p.advanceOut;
+  const tots = `<div class="pp-tots">
+    ${box('Должен нам', p.owedToUs ? `+${rub(p.owedToUs)}` : rub(0), p.owedToUs ? 'plus' : '', cnt('in') ? positions(cnt('in')) : 'ничего')}
+    ${box('Мы должны', p.weOwe ? `−${rub(p.weOwe)}` : rub(0), p.weOwe ? 'minus' : '', cnt('out') ? positions(cnt('out')) : 'ничего')}
+    ${adv ? box('Аванс', rub(adv), 'adv', p.advanceIn ? 'его переплата — покроет следующие' : 'наша переплата — покроет закупы') : ''}
+  </div>`;
+  const acts = real
+    ? `<div class="pp-acts"><button class="btn btn-primary" type="button" data-ppay>Оплачено</button>${p.owedToUs && p.weOwe ? `<button class="btn" type="button" data-poffset title="Он должен вам и вы ему — закрыть обе стороны без денег">Взаимозачёт</button>` : ''}<span id="ppSel" class="pp-sel"></span></div>`
+    : '<p class="hint pp-orphan">У этих позиций нет контакта. Укажите человека (✎ «чья?») — тогда их можно оплатить вместе с его остальными.</p>';
+  const itemLine = (it) => {
+    const ref = esc(it.ref);
+    const sign = it.dir === 'in' ? '+' : '−';
+    const cls = it.dir === 'in' ? 'plus' : 'minus';
+    const when = it.remaining > 0 && real
+      ? `<label class="pick"><input type="checkbox" data-psel="${ref}">${isoDay(it.date)}</label>`
+      : `<span class="pick-gap"></span>${isoDay(it.date)}`;
+    const part = it.remaining > 0 && it.remaining < it.amount;
+    const sum = `<span class="${it.remaining > 0 ? cls : ''}">${sign}${rub(part ? it.remaining : it.amount)}</span>${part ? `<small>из ${rub(it.amount)}</small>` : ''}`;
+    const extra = it.state === 'partial'
+      ? `<button class="btn ghost tiny" type="button" data-pclose="${ref}" title="Скидка или недоплата, которую уже не ждём">Простить остаток</button>`
+      : it.state === 'closed' ? `<button class="btn ghost tiny" type="button" data-punclose="${ref}" title="Снова ждать остаток">Вернуть</button>` : '';
+    const whose = it.source === 'ads' ? `<button class="link-ic" type="button" data-dperson="${ref}" title="Чья сделка — поменять человека">✎ чья?</button>` : '';
+    return `<div class="deal pp-it${it.remaining > 0 ? '' : ' done'}"><span class="when">${when}</span>
+      <div class="what"><b>${it.dir === 'in' ? 'Он нам' : 'Мы ему'} · ${esc(it.what)}</b><small>${SRC[it.source]}${whose}</small></div>
+      <div class="sum">${sum}</div><div class="acts">${debtStatus(it)}${extra}</div></div>`;
+  };
+  const dirOf = new Map(p.items.map((i) => [i.ref, i.dir]));
+  const payLine = (x) => {
+    const w = S.wallets.find((y) => y.id === x.walletId);
+    const off = x.kind === 'offset';
+    const title = off ? 'Взаимозачёт' : x.dir === 'in' ? 'Он заплатил' : 'Мы заплатили';
+    const sum = off ? rub(x.rub) : `<span class="${x.dir === 'in' ? 'plus' : 'minus'}">${x.dir === 'in' ? '+' : '−'}${w && w.currency !== 'RUB' ? amt(x.amount, w.currency) : rub(x.rub)}</span>${w && w.currency !== 'RUB' ? `<small>≈ ${rub(x.rub)}</small>` : ''}`;
+    const parts = [
+      ...x.parts.map((pt) => `<li><span>${off ? (dirOf.get(pt.ref) === 'out' ? 'мы ему · ' : 'он нам · ') : ''}${esc(pt.what)}</span><b>${rub(pt.rub)}</b></li>`),
+      ...(x.advance ? [`<li><span>в аванс</span><b>${rub(x.advance)}</b></li>`] : []),
+    ].join('');
+    const meta = [off ? 'без движения денег' : w ? esc(w.name) : '', esc(x.note)].filter(Boolean).join(' · ');
+    return `<div class="op pp-pay"><span class="when">${day(x.at)}</span>
+      <div class="what"><b>${title}</b><small>${meta}</small>${parts ? `<ul class="pp-parts">${parts}</ul>` : ''}</div>
+      <div class="sum">${sum}</div><button class="del" type="button" data-pdel="${x.id}" aria-label="Удалить оплату" title="Удалить оплату целиком">×</button></div>`;
+  };
+  const openDone = $('#personBody .pp-done')?.open ? ' open' : '';
+  $('#personBody').innerHTML =
+    tots + acts +
+    (live.length ? `<h4 class="ads-h">Ждём · ${live.length}</h4>${live.map(itemLine).join('')}` : `<div class="empty">${p.items.length ? 'Долгов нет — всё оплачено.' : 'Позиций нет.'}</div>`) +
+    (done.length ? `<details class="pp-done"${openDone}><summary>Оплаченные · ${done.length}</summary>${done.map(itemLine).join('')}</details>` : '') +
+    (p.payments.length ? `<h4 class="ads-h">Оплаты · ${p.payments.length}</h4>${p.payments.map(payLine).join('')}` : '');
+  syncPersonSel();
+}
+
+// галочки: одна сторона за раз — продажи и закупы оплачиваются в разные стороны
+function syncPersonSel() {
+  const { p, sel } = personCard;
+  for (const x of $('#personBody').querySelectorAll('[data-psel]')) x.checked = sel.has(x.dataset.psel);
+  const el = $('#ppSel');
+  if (!el) return;
+  const list = p.items.filter((i) => sel.has(i.ref));
+  const sum = list.reduce((t, i) => t + i.remaining, 0);
+  el.innerHTML = list.length
+    ? `выбрано ${list.length} · <span class="${list[0].dir === 'in' ? 'plus' : 'minus'}">${list[0].dir === 'in' ? '+' : '−'}${rub(sum)}</span> <button class="link" type="button" data-psel-clear>снять</button>`
+    : 'без галочек — самые старые позиции первыми';
+  $('#personBody [data-ppay]').textContent = list.length ? 'Оплачено · выбранные' : 'Оплачено';
+}
+
+function openPersonPay() {
+  const { p, sel } = personCard;
+  const chosen = p.items.filter((i) => sel.has(i.ref));
+  const both = p.owedToUs > 0 && p.weOwe > 0;
+  const dir = chosen[0]?.dir ?? (p.weOwe > 0 && !p.owedToUs ? 'out' : 'in');
+  ppay = { p, dir, refs: chosen.length ? chosen.map((i) => i.ref) : null };
+  const f = $('#ppayForm');
+  f.reset();
+  $('#ppayError').hidden = true;
+  $('#ppayTitle').textContent = `Оплачено · ${p.name}`;
+  $('#ppayWho').textContent = ppay.refs
+    ? `По выбранным: ${positions(chosen.length)} — по порядку даты.`
+    : 'Без галочек: самые старые позиции закроются первыми, последняя — частично, лишнее — в аванс.';
+  // направление выбирают, когда оно не следует из долгов: долги в обе стороны или долгов нет
+  $('#ppayDir').hidden = !!ppay.refs || !(both || (!p.owedToUs && !p.weOwe));
+  f.walletId.innerHTML = adWallets().map((w) => `<option value="${w.id}">${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
+  f.date.value = todayIso();
+  setPPayDir(dir);
+  $('#ppayDlg').showModal();
+  f.amount.focus();
+}
+
+function setPPayDir(dir) {
+  ppay.dir = dir;
+  for (const b of $('#ppayDir').children) b.classList.toggle('on', b.dataset.dir === dir);
+  $('#ppayAmountLabel').firstChild.textContent = dir === 'in' ? 'Сколько пришло' : 'Сколько ушло';
+  ppayDefault();
+}
+
+const ppayTargets = () =>
+  ppay.refs ? ppay.p.items.filter((i) => ppay.refs.includes(i.ref)) : ppay.p.items.filter((i) => i.dir === ppay.dir && i.remaining > 0);
+
+// курс для расчёта: рубль — 1, вписан — он, иначе текущий из /api/state
+function ppayRate() {
+  const f = $('#ppayForm');
+  const w = S.wallets.find((x) => String(x.id) === f.walletId.value);
+  if (!w) return { w: null, rate: null };
+  if (w.currency === 'RUB') return { w, rate: 1 };
+  const typed = Number(String(f.rate.value).replace(/[\s ]/g, '').replace(',', '.'));
+  return { w, rate: typed > 0 ? typed : w.rate };
+}
+
+// сумма по умолчанию — остаток выбранных (или всех этого направления) в валюте кошелька
+function ppayDefault() {
+  const f = $('#ppayForm');
+  const { w, rate } = ppayRate();
+  f.querySelector('[data-pay-rate]').hidden = !w || w.currency === 'RUB';
+  const sum = ppayTargets().reduce((t, i) => t + i.remaining, 0);
+  f.amount.value = !sum || !rate ? '' : w.currency === 'RUB' ? moneyStr(sum) : fromRub(sum, rate);
+  syncPPay();
+}
+
+// до записи: что закроется, что станет частичным, что уйдёт в аванс — тем же правилом, что сервер
+function syncPPay() {
+  const f = $('#ppayForm');
+  const { w, rate } = ppayRate();
+  const amount = parseMoney(f.amount.value);
+  const targets = ppayTargets();
+  const box = $('#ppayPreview');
+  if (!w) return (box.innerHTML = '<p class="hint">Нет кошелька для оплаты рекламы.</p>');
+  if (amount === null || amount === 0) return (box.innerHTML = '<p class="hint">Впишите сумму — здесь будет видно, что она закроет.</p>');
+  if (!rate) return (box.innerHTML = `<p class="hint">Нет курса ${esc(w.currency)} — впишите его, чтобы посчитать рубли.</p>`);
+  const total = toRubC(amount, rate);
+  const { parts, left } = distributeC(targets, total);
+  const touched = new Set(parts.map((x) => x.it.ref));
+  const rest = targets.filter((i) => !touched.has(i.ref) && i.remaining > 0);
+  const row = (cls, tag, what, v) => `<div class="pv-r ${cls}"><span class="pv-t">${tag}</span><span class="pv-w">${what}</span><b>${v}</b></div>`;
+  box.innerHTML =
+    `<div class="pv-h">${w.currency !== 'RUB' ? `≈ ${rub(total)} по курсу ${rate.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} · ` : ''}${ppay.dir === 'in' ? 'он платит вам' : 'вы платите ему'}</div>` +
+    parts
+      .map(({ it, rub: r }) =>
+        r >= it.remaining
+          ? row('ok', 'закроется', `${isoDay(it.date)} · ${esc(it.what)}`, rub(r))
+          : row('part', 'частично', `${isoDay(it.date)} · ${esc(it.what)} — останется ${rub(it.remaining - r)}`, rub(r)))
+      .join('') +
+    (rest.length ? row('wait', 'ждём дальше', `${positions(rest.length)} не хватило`, rub(rest.reduce((t, i) => t + i.remaining, 0))) : '') +
+    (left > 0 ? row('adv', 'в аванс', ppay.dir === 'in' ? 'покроет его следующие позиции' : 'наша переплата — покроет следующие закупы', rub(left)) : '') +
+    (!targets.length ? '<p class="hint">Позиций этого направления нет — вся сумма станет авансом.</p>' : '');
+}
+
+function openOffset() {
+  const { p } = personCard;
+  const max = Math.min(p.owedToUs, p.weOwe);
+  const f = $('#offsetForm');
+  f.reset();
+  $('#offsetError').hidden = true;
+  $('#offsetWho').textContent = `${p.name}: должен вам ${rub(p.owedToUs)}, вы ему ${rub(p.weOwe)}. Зачесть можно до ${rub(max)}.`;
+  f.amount.value = moneyStr(max);
+  f.date.value = todayIso();
+  syncOffset();
+  $('#offsetDlg').showModal();
+}
+
+function syncOffset() {
+  const { p } = personCard;
+  const f = $('#offsetForm');
+  const max = Math.min(p.owedToUs, p.weOwe);
+  const amount = parseMoney(f.amount.value);
+  const box = $('#offsetPreview');
+  if (!amount) return (box.innerHTML = '<p class="hint">Впишите сумму зачёта в рублях.</p>');
+  if (amount > max) return (box.innerHTML = `<p class="err">Не больше ${rub(max)}: столько ${p.owedToUs <= p.weOwe ? 'он должен вам' : 'вы должны ему'}.</p>`);
+  const side = (dir, label) => {
+    const { parts } = distributeC(p.items.filter((i) => i.dir === dir && i.remaining > 0), amount);
+    return `<div class="pv-h">${label}</div>` + parts
+      .map(({ it, rub: r }) => `<div class="pv-r ${r >= it.remaining ? 'ok' : 'part'}"><span class="pv-t">${r >= it.remaining ? 'закроется' : 'частично'}</span><span class="pv-w">${isoDay(it.date)} · ${esc(it.what)}${r < it.remaining ? ` — останется ${rub(it.remaining - r)}` : ''}</span><b>${rub(r)}</b></div>`)
+      .join('');
+  };
+  box.innerHTML = side('in', 'Он вам') + side('out', 'Вы ему');
+}
+
+function openPersonEdit(p) {
+  personEditId = p ? p.personId : null;
+  const f = $('#personEditForm');
+  f.reset();
+  $('#personEditError').hidden = true;
+  $('#personEditTitle').textContent = p ? 'Человек' : 'Новый человек';
+  f.name.value = p?.name ?? '';
+  f.username.value = p?.username ? `@${p.username}` : '';
+  $('#personEditHint').textContent = p
+    ? 'Имя видно здесь, в приветке и в боте. @username узнаёт человека в новых сделках из аналитики.'
+    : 'Если такой уже есть (тот же @username или то же имя без @), откроется он, а не новый.';
+  const others = peopleRows.filter((x) => x.personId !== null && x.personId !== p?.personId);
+  $('#personMerge').hidden = !p || !others.length;
+  f.into.innerHTML = others.map((x) => `<option value="${x.personId}">${esc(personLabel(x))}</option>`).join('');
+  $('#personEditDlg').showModal();
+}
+
+function openDealPerson(ref) {
+  dealPersonRef = ref;
+  const d = deals.find((x) => x.ref === ref);
+  const f = $('#dealPersonForm');
+  f.reset();
+  $('#dealPersonError').hidden = true;
+  const p = d?.personId != null ? peopleById(d.personId) : null;
+  $('#dealPersonDeal').textContent = d
+    ? `${dealDay(d.date)} · ${dealTitle(d)} · ${d.channels}${d.contact ? ` · в аналитике: ${d.contact}` : ''}`
+    : ref;
+  f.contact.value = p ? personLabel(p) : d?.contact ?? '';
+  $('#dealPersonDlg').showModal();
+  f.contact.select();
 }
 
 // --- виды и проекты -----------------------------------------------------------------
@@ -1027,19 +1453,21 @@ async function restoreVpn(ref, button) {
 function openPay(ref) {
   const d = deals.find((x) => x.ref === ref);
   if (!d) return;
+  const part = dealCovered(d) > 0;
+  const tail = 'Меньше суммы — оплачена частично, остаток ждём; больше — переплата уйдёт в аванс человека. Встречный долг закрывайте «Взаимозачётом» в его карточке.';
   showPay({
     title: d.kind === 'sale' ? 'Продажа оплачена' : 'Закуп оплачен',
-    desc: `${dealDay(d.date)} · ${dealTitle(d)} · ${[d.contact, d.channels].filter(Boolean).join(' · ')}${d.amount != null ? ` · ${rub(d.amount)}` : ''}`,
-    amount: d.amount,
+    desc: `${dealDay(d.date)} · ${dealTitle(d)} · ${[d.contact, d.channels].filter(Boolean).join(' · ')}${d.amount != null ? ` · ${part ? `осталось ${rub(d.remaining)} из ${rub(d.amount)}` : rub(d.amount)}` : ''}`,
+    amount: part ? d.remaining : d.amount,
     amountLabel: d.kind === 'sale' ? 'Сколько пришло' : 'Сколько ушло',
     hint: d.kind === 'sale'
-      ? 'Доход «Реклама», без комиссии. Сумма сделки пересчитана по курсу — впишите, сколько пришло на самом деле (при взаимозачёте — разницу).'
-      : 'Расход «Закуп рекламы» с этого кошелька, без комиссии.',
+      ? `Доход «Реклама», без комиссии. Сумма пересчитана по курсу — впишите, сколько пришло на самом деле. ${d.amount != null ? tail : ''}`
+      : `Расход «Закуп рекламы» с этого кошелька, без комиссии. ${d.amount != null ? tail : ''}`,
     url: `/api/ad-deals/${encodeURIComponent(ref)}/pay`,
   });
 }
 
-// Несколько мест одним переводом: сумма делится по ценам мест (ads.ts, payDeals).
+// Несколько мест одним переводом: самые старые целиком, последнее — частично (ads.ts, payDeals).
 function openPayMany(list, who) {
   const ok = list.filter(payable);
   if (!ok.length) return toast('Оплачивать нечего: у выбранных мест нет суммы');
@@ -1052,7 +1480,7 @@ function openPayMany(list, who) {
     desc: `${who ? `${who} · ` : ''}${ok.map((d) => `${dealDay(d.date)} ${SLOT[d.slot] ?? d.slot}`).join(', ')} · ${rub(sum)}${skipped ? ` · без суммы и разобранные (${skipped}) — мимо` : ''}`,
     amount: sum,
     amountLabel: sale ? 'Сколько пришло всего' : 'Сколько ушло всего',
-    hint: `${sale ? 'Доход «Реклама»' : 'Расход «Закуп рекламы»'}, без комиссии. Впишите, сколько ${sale ? 'пришло' : 'ушло'} на самом деле: сумма разделится между местами по их цене, каждое станет оплаченным.`,
+    hint: `${sale ? 'Доход «Реклама»' : 'Расход «Закуп рекламы»'}, без комиссии. Впишите, сколько ${sale ? 'пришло' : 'ушло'} на самом деле: сумма закроет места по порядку даты — старые целиком, последнее частично, лишнее — в аванс человека.`,
     url: '/api/ad-deals/pay-many',
     extra: { refs: ok.map((d) => d.ref) },
   });
@@ -1103,8 +1531,8 @@ function syncPay() {
     return;
   }
   if (amount == null) return;
-  const v = w.currency === 'RUB' ? amount / MICRO : w.rate ? Math.round((amount / MICRO / w.rate) * 100) / 100 : '';
-  f.amount.value = v === '' ? '' : String(v).replace('.', ',');
+  // частичная оплата теперь частичная: сумма по умолчанию должна давать ровно рубли сделки
+  f.amount.value = w.currency === 'RUB' ? String(amount / MICRO).replace('.', ',') : w.rate ? fromRub(amount, w.rate) : '';
 }
 
 
@@ -1194,12 +1622,13 @@ async function load() {
   ]);
   S = state;
   deals = ads;
-  [vpnRows, vpnSkipped, welcomeRows, incomeRows, recurringRows] = await Promise.all([
+  [vpnRows, vpnSkipped, welcomeRows, incomeRows, recurringRows, peopleRows] = await Promise.all([
     api('/api/vpn/unsorted'),
     api('/api/vpn/skipped'),
     api('/api/welcome'),
     api(byYear ? `/api/income?year=${year}` : `/api/income?month=${month}`),
     api(`/api/recurring?month=${recMonth()}`),
+    api('/api/people'),
   ]);
   partnerRows = await api('/api/partner-settlement');
   $('#login').hidden = true;
@@ -1225,6 +1654,10 @@ async function load() {
   renderAds();
   renderIncome();
   renderWelcome();
+  renderPeople();
+  renderPeopleDatalist();
+  // открытая карточка человека — со свежими позициями и оплатами
+  if (personCard && $('#personDlg').open) await openPerson(personCard.p.personId, true).catch((e) => toast(e.message));
   renderRecurring();
   renderVpn();
   renderVpnSkipped();
@@ -1383,11 +1816,6 @@ $('#walletForm').addEventListener('submit', async (e) => {
 $('#ads').addEventListener('click', async (e) => {
   const pay = e.target.closest('[data-pay]');
   if (pay) return openPay(pay.dataset.pay);
-  const person = e.target.closest('[data-pay-person]');
-  if (person) {
-    const p = people[Number(person.dataset.payPerson)];
-    return p && openPayMany(p.list, p.contact);
-  }
   const b = e.target.closest('[data-barter],[data-unbarter],[data-wait],[data-unwait]');
   if (!b) return;
   const { barter, unbarter, wait, unwait } = b.dataset;
@@ -1562,7 +1990,13 @@ $('#welcome').addEventListener('click', async (e) => {
   try {
     if (b.dataset.wfix) openFix(byId(b.dataset.wfix));
     else if (b.dataset.wedit) openWelcome(byId(b.dataset.wedit));
-    else if (b.dataset.wpay) openFixPay(Number(b.dataset.wpay));
+    else if (b.dataset.wlink) openLink(byId(b.dataset.wlink));
+    else if (b.dataset.wlinkdel) {
+      if (!confirm('Удалить ссылку? По ней нет фиксаций — текущей станет прежняя.')) return;
+      await api(`/api/welcome-link/${b.dataset.wlinkdel}`, { method: 'DELETE' });
+      await load();
+      toast('Ссылка удалена');
+    }
     else if (b.dataset.wstop) {
       const d = byId(b.dataset.wstop);
       await api(`/api/welcome/${d.id}`, { method: 'PATCH', body: JSON.stringify({ stoppedOn: d.stoppedOn ? null : todayIso() }) });
@@ -1603,17 +2037,207 @@ $('#welcomeDel').addEventListener('click', async () => {
   }
 });
 $('#fixForm').addEventListener('input', syncFix);
+async function submitFix() {
+  const f = Object.fromEntries(new FormData($('#fixForm')));
+  const r = await api(`/api/welcome/${fixDealId}/fix`, { method: 'POST', body: JSON.stringify({ value: f.value, onDate: f.onDate }) });
+  $('#fixDlg').close();
+  await load();
+  toast(r.count ? `Зафиксировано: ${reqs(r.count)}, ${rub(r.amount)} — в «Нам должны»` : 'Новых заявок нет');
+}
 $('#fixForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#fixError').hidden = true;
+  try {
+    await submitFix();
+  } catch (err) {
+    // меньше прошлого по ссылке — сервер спрашивает «Это новая ссылка?»
+    if (err.code === 'new_link') {
+      const d = welcomeRows.find((x) => x.id === fixDealId);
+      if (d) return askNewLink(d);
+    }
+    $('#fixError').textContent = err.message;
+    $('#fixError').hidden = false;
+  }
+});
+// «Да, новая ссылка»: ссылка с дня фиксации по нынешней цене, затем то же число — уже на ней
+$('#fixNewLinkYes').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  $('#fixError').hidden = true;
+  try {
+    await api(`/api/welcome/${fixDealId}/links`, { method: 'POST', body: JSON.stringify({ startedOn: $('#fixForm').onDate.value }) });
+    welcomeRows = await api('/api/welcome');
+    await submitFix();
+    toast('Новая ссылка заведена, число зафиксировано на ней');
+  } catch (err) {
+    await load().catch(() => {});
+    $('#fixError').textContent = err.message;
+    $('#fixError').hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
+$('#fixNewLinkNo').addEventListener('click', () => {
+  $('#fixNewLink').hidden = true;
+  fixInput().select();
+});
+$('#linkForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target));
   try {
-    const r = await api(`/api/welcome/${fixDealId}/fix`, { method: 'POST', body: JSON.stringify(f) });
-    $('#fixDlg').close();
+    await api(`/api/welcome/${linkDealId}/links`, { method: 'POST', body: JSON.stringify({ startedOn: f.startedOn, price: f.price, label: f.label }) });
+    $('#linkDlg').close();
     await load();
-    toast(r.count ? `Зафиксировано: ${reqs(r.count)}, ${rub(r.amount)} — в «Нам должны»` : 'Новых заявок нет');
+    toast('Новая ссылка — счётчик заявок с нуля');
   } catch (err) {
-    $('#fixError').textContent = err.message;
-    $('#fixError').hidden = false;
+    $('#linkError').textContent = err.message;
+    $('#linkError').hidden = false;
+  }
+});
+
+// --- люди: карточка, оплата, взаимозачёт, правка ---------------------------------------
+$('#addPerson').addEventListener('click', () => openPersonEdit(null));
+$('#personEdit').addEventListener('click', () => personCard && openPersonEdit(personCard.p));
+$('#personBody').addEventListener('change', (e) => {
+  const box = e.target.closest('[data-psel]');
+  if (!box) return;
+  const { p, sel } = personCard;
+  const it = p.items.find((i) => i.ref === box.dataset.psel);
+  if (box.checked) {
+    // другая сторона — другие деньги: галочки той стороны снимаются
+    for (const ref of [...sel]) if (p.items.find((i) => i.ref === ref)?.dir !== it.dir) sel.delete(ref);
+    sel.add(it.ref);
+  } else sel.delete(it.ref);
+  syncPersonSel();
+});
+$('#personBody').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.pselClear !== undefined) {
+    personCard.sel.clear();
+    return syncPersonSel();
+  }
+  if (b.dataset.ppay !== undefined) return openPersonPay();
+  if (b.dataset.poffset !== undefined) return openOffset();
+  try {
+    if (b.dataset.pclose) {
+      const it = personCard.p.items.find((i) => i.ref === b.dataset.pclose);
+      if (!confirm(`Простить остаток ${rub(it.remaining)} по «${it.what}»? Позиция закроется, остаток больше не ждём.`)) return;
+      await api(`/api/debts/${encodeURIComponent(it.ref)}/close`, { method: 'POST', body: JSON.stringify({ on: true }) });
+      await load();
+      toast('Остаток прощён');
+    } else if (b.dataset.punclose) {
+      await api(`/api/debts/${encodeURIComponent(b.dataset.punclose)}/close`, { method: 'POST', body: JSON.stringify({ on: false }) });
+      await load();
+      toast('Снова ждём остаток');
+    } else if (b.dataset.pdel) {
+      const x = personCard.p.payments.find((y) => y.id === Number(b.dataset.pdel));
+      if (!confirm(`Удалить ${x?.kind === 'offset' ? 'взаимозачёт' : 'оплату'} ${x ? rub(x.rub) : ''} целиком? Позиции снова будут ждать эти деньги${x?.advance ? ', аванс уменьшится' : ''}.`)) return;
+      await api(`/api/payments/${b.dataset.pdel}`, { method: 'DELETE' });
+      await load();
+      toast('Оплата удалена');
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('#ppayDir').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dir]');
+  if (b && ppay) setPPayDir(b.dataset.dir);
+});
+$('#ppayForm').addEventListener('change', (e) => {
+  if (e.target.name === 'walletId') ppayDefault();
+});
+$('#ppayForm').addEventListener('input', (e) => {
+  if (e.target.name === 'amount' || e.target.name === 'rate') syncPPay();
+});
+$('#ppayForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const [y, m, d] = String(f.date || todayIso()).split('-').map(Number);
+  const at = Date.UTC(y, m - 1, d, 12) - MSK;
+  try {
+    const r = await api(`/api/people/${ppay.p.personId}/pay`, {
+      method: 'POST',
+      body: JSON.stringify({ dir: ppay.dir, walletId: f.walletId, amount: f.amount, rate: f.rate, at, note: f.note, ...(ppay.refs ? { refs: ppay.refs } : {}) }),
+    });
+    $('#ppayDlg').close();
+    if (personCard) personCard.sel.clear();
+    await load();
+    toast([r.paid ? `Записано: ${positions(r.paid)}${r.partial ? ', последняя — частично' : ''}` : 'Записано', r.advance ? `в аванс ${rub(r.advance)}` : ''].filter(Boolean).join(' · '));
+  } catch (err) {
+    $('#ppayError').textContent = err.message;
+    $('#ppayError').hidden = false;
+  }
+});
+$('#offsetForm').addEventListener('input', syncOffset);
+$('#offsetForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const [y, m, d] = String(f.date || todayIso()).split('-').map(Number);
+  try {
+    const r = await api(`/api/people/${personCard.p.personId}/offset`, { method: 'POST', body: JSON.stringify({ amount: f.amount, at: Date.UTC(y, m - 1, d, 12) - MSK, note: f.note }) });
+    $('#offsetDlg').close();
+    await load();
+    toast(`Зачтено ${rub(r.amount)} с каждой стороны`);
+  } catch (err) {
+    $('#offsetError').textContent = err.message;
+    $('#offsetError').hidden = false;
+  }
+});
+$('#personEditForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  try {
+    if (personEditId === null) {
+      const name = f.name.trim();
+      const u = f.username.trim().replace(/^@/, '');
+      const contact = name && u ? `${name} (@${u})` : name || (u ? `@${u}` : '');
+      const { id } = await api('/api/people', { method: 'POST', body: JSON.stringify({ contact }) });
+      $('#personEditDlg').close();
+      await load();
+      await openPerson(id);
+    } else {
+      await api(`/api/people/${personEditId}`, { method: 'PATCH', body: JSON.stringify({ name: f.name, username: f.username }) });
+      $('#personEditDlg').close();
+      await load();
+      toast('Сохранено');
+    }
+  } catch (err) {
+    $('#personEditError').textContent = err.message;
+    $('#personEditError').hidden = false;
+  }
+});
+$('#personMergeBtn').addEventListener('click', async () => {
+  const f = $('#personEditForm');
+  const into = Number(f.into.value);
+  const target = peopleRows.find((x) => x.personId === into);
+  if (!into || !confirm(`Объединить с «${target ? personLabel(target) : into}»? Сделки, приветка и оплаты перейдут к нему, эта запись удалится.`)) return;
+  try {
+    await api('/api/people/merge', { method: 'POST', body: JSON.stringify({ from: personEditId, into }) });
+    $('#personEditDlg').close();
+    personCard = null;
+    await load();
+    await openPerson(into);
+    toast('Объединено');
+  } catch (err) {
+    $('#personEditError').textContent = err.message;
+    $('#personEditError').hidden = false;
+  }
+});
+// «Чья сделка»: знакомый находится по @username или имени, новый заводится (people.ts, personFor)
+$('#dealPersonForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const contact = $('#dealPersonForm').contact.value;
+  try {
+    const { id } = await api('/api/people', { method: 'POST', body: JSON.stringify({ contact }) });
+    await api(`/api/ad-deals/${encodeURIComponent(dealPersonRef)}/person`, { method: 'POST', body: JSON.stringify({ personId: id }) });
+    $('#dealPersonDlg').close();
+    await load();
+    toast('Сделка перешла к человеку');
+  } catch (err) {
+    $('#dealPersonError').textContent = err.message;
+    $('#dealPersonError').hidden = false;
   }
 });
 
@@ -1694,6 +2318,13 @@ $('#ops').addEventListener('click', async (e) => {
 
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-close]')) e.target.closest('dialog')?.close();
+  const po = e.target.closest('[data-person-open]');
+  if (po) {
+    if ($('#moreDlg').open) $('#moreDlg').close();
+    openPerson(po.dataset.personOpen === 'none' ? null : Number(po.dataset.personOpen)).catch((err) => toast(err.message));
+  }
+  const dp = e.target.closest('[data-dperson]');
+  if (dp) openDealPerson(dp.dataset.dperson);
   if (e.target.closest('[data-add-op]')) openOp();
   if (e.target.closest('[data-more]')) $('#moreDlg').showModal();
   if (e.target.closest('[data-catalog]')) {

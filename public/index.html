@@ -33,6 +33,7 @@
     <div class="nav-cap">Разделы</div>
     <nav id="nav" aria-label="Разделы">
       <button class="nav-it on" type="button" data-scr="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg><span class="lbl">Обзор</span></button>
+      <button class="nav-it" type="button" data-scr="people"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.4 3.7-5.4 7-5.4s6.2 2 7 5.4"/><path d="M17.5 4.2 19 5.7l2.6-2.6" /></svg><span class="lbl">Люди</span><span class="nbadge" data-nb="people" hidden></span></button>
       <button class="nav-it" type="button" data-scr="ads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 17 5v13L3 12.5v-2z"/><path d="M7 13.5V18a2 2 0 0 0 4 0v-3"/><path d="M17 8.5c1.7.6 2.5 1.7 2.5 3s-.8 2.4-2.5 3"/></svg><span class="lbl">Реклама</span><span class="nbadge" data-nb="ads" hidden></span></button>
       <button class="nav-it" type="button" data-scr="welcome"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="lbl">Приветка</span><span class="nbadge" data-nb="welcome" hidden></span></button>
       <button class="nav-it" type="button" data-scr="recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11a7 7 0 0 1 12-5l2 2"/><path d="M18 4v4h-4"/><path d="M20 13a7 7 0 0 1-12 5l-2-2"/><path d="M6 20v-4h4"/></svg><span class="lbl">Регулярные</span><span class="nbadge" data-nb="recurring" hidden></span></button>
@@ -112,6 +113,12 @@
         </div>
       </section>
 
+      <section class="screen" id="scr-people">
+        <article class="card hero" id="peopleCard">
+          <div class="card-h"><span class="card-idx">01 / люди</span><div class="card-tt"><h2 class="card-t">Долги по людям</h2><div class="card-s" id="peopleSum">Реклама и приветка одного человека — вместе: что он должен вам и что вы ему</div></div><div class="right"><button class="btn" id="addPerson" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Человек</button></div></div>
+          <div id="people"></div>
+        </article>
+      </section>
       <section class="screen" id="scr-ads">
         <article class="card" id="adsCard">
           <div class="card-h"><span class="card-idx">01 / сделки</span><div class="card-tt"><h2 class="card-t">Сделки рекламы</h2><div class="card-s">Из аналитики: оплачено, ждём оплату, бартер. Галочки — отметить пачкой</div></div><div class="right"><button class="btn" id="adsAll" type="button">Все сделки</button></div></div>
@@ -119,7 +126,7 @@
           <div class="ads-bar" id="adsBar" hidden>
             <span id="adsPicked"></span>
             <div class="ads-bar-b">
-              <button class="btn btn-primary" type="button" data-bulk-pay title="Одним переводом: сумма разделится между местами по их цене">Оплачено</button>
+              <button class="btn btn-primary" type="button" data-bulk-pay title="Одним переводом: закроет места по порядку даты, последнее — частично">Оплачено</button>
               <button class="btn" type="button" data-bulk="waiting" title="Продажи — «Ждём оплату», закупы — «Надо оплатить»">Ждём оплату</button>
               <button class="btn" type="button" data-bulk="barter">Бартер</button>
               <button class="btn" type="button" data-bulk="unsort">Не разобрана</button>
@@ -193,6 +200,7 @@
   <div class="sheet-b">
     <div class="dlg-h"><h3>Ещё</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
     <nav class="more-nav" aria-label="Другие разделы">
+      <button class="nav-it" type="button" data-scr="people"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.4 3.7-5.4 7-5.4s6.2 2 7 5.4"/><path d="M17.5 4.2 19 5.7l2.6-2.6" /></svg><span class="lbl">Люди — долги</span><span class="nbadge" data-nb="people" hidden></span></button>
       <button class="nav-it" type="button" data-scr="welcome"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="lbl">Приветка</span><span class="nbadge" data-nb="welcome" hidden></span></button>
       <button class="nav-it" type="button" data-scr="vpn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2 2 4-4"/></svg><span class="lbl">VPN — разобрать</span><span class="nbadge" data-nb="vpn" hidden></span></button>
       <button class="nav-it" type="button" data-scr="partner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.2 3.3-5 6.5-5s5.8 1.8 6.5 5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M17.8 15.3c2 .7 3.3 2.2 3.7 4.7"/></svg><span class="lbl">Партнёр</span></button>
@@ -242,12 +250,12 @@
   <form id="welcomeForm" method="dialog" novalidate>
     <div class="dlg-h"><h3 id="welcomeTitle">Ссылка в приветке</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
     <div class="fields">
-      <label class="wide">Кто покупатель<input name="contact" required maxlength="100" placeholder="Иван (@ivan)"></label>
-      <label>Цена за заявку, ₽<input name="price" inputmode="decimal" required placeholder="5"></label>
+      <label class="wide">Кто покупатель<input name="contact" list="peopleList" required maxlength="100" autocomplete="off" placeholder="Иван (@ivan)"></label>
+      <label id="welcomePriceLabel">Цена за заявку, ₽<input name="price" inputmode="decimal" required placeholder="5"></label>
       <label>С какого дня<input type="date" name="startedOn" required></label>
       <label class="wide">Заметка<input name="note" maxlength="500" placeholder="необязательно"></label>
     </div>
-    <p class="hint">Цена меняется для следующих фиксаций — прошлые посчитаны по старой.</p>
+    <p class="hint" id="welcomeHint"></p>
     <p id="welcomeError" class="err" hidden></p>
     <div class="dlg-f"><button class="btn btn-danger" type="button" id="welcomeDel" hidden>Удалить</button><span class="sp"></span><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
   </form>
@@ -258,14 +266,107 @@
     <div class="dlg-h"><h3>Зафиксировать заявки</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
     <p id="fixDeal" class="muted pay-deal"></p>
     <div class="fields">
-      <label>Заявок всего, с начала<input name="total" inputmode="numeric" required placeholder="340"></label>
+      <label>Всего по ссылке или +N<input name="value" inputmode="text" autocomplete="off" required placeholder="340 или +120"></label>
       <label>Дата<input type="date" name="onDate" required></label>
     </div>
     <p id="fixCalc" class="hint"></p>
+    <div id="fixNewLink" class="ask" hidden>
+      <p id="fixNewLinkText"></p>
+      <div class="ask-b"><button class="btn btn-primary" type="button" id="fixNewLinkYes">Да, новая ссылка</button><button class="btn ghost" type="button" id="fixNewLinkNo">Нет, исправлю число</button></div>
+    </div>
     <p id="fixError" class="err" hidden></p>
     <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Зафиксировать</button></div>
   </form>
 </dialog>
+
+<dialog id="linkDlg" class="dlg">
+  <form id="linkForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Новая ссылка</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p id="linkDeal" class="muted pay-deal"></p>
+    <div class="fields">
+      <label>С какого дня<input type="date" name="startedOn" required></label>
+      <label>Цена за заявку, ₽<input name="price" inputmode="decimal" placeholder="как была"></label>
+      <label class="wide">Подпись<input name="label" maxlength="60" placeholder="необязательно: «вторая», «канал X»"></label>
+    </div>
+    <p class="hint">Покупатель сменил ссылку — счётчик заявок начнётся с нуля. Фиксации по прежней ссылке остаются с её ценой.</p>
+    <p id="linkError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Завести ссылку</button></div>
+  </form>
+</dialog>
+
+<dialog id="personDlg" class="dlg dlg-person">
+  <div class="dlg-body">
+    <div class="dlg-h"><div class="pp-head"><h3 id="personName"></h3><span id="personUser" class="muted mono"></span><button class="btn ghost tiny" type="button" id="personEdit" title="Имя, @username, объединить">✎ Изменить</button></div><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div id="personBody"></div>
+  </div>
+</dialog>
+
+<dialog id="ppayDlg" class="dlg">
+  <form id="ppayForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3 id="ppayTitle">Оплачено</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p id="ppayWho" class="muted pay-deal"></p>
+    <div class="seg ppay-dir" id="ppayDir" role="group" aria-label="Кто платит"><button type="button" data-dir="in" class="on">Он заплатил нам</button><button type="button" data-dir="out">Мы заплатили ему</button></div>
+    <div class="fields">
+      <label>Кошелёк<select name="walletId"></select></label>
+      <label>Дата<input type="date" name="date" required></label>
+      <label id="ppayAmountLabel">Сколько пришло<input name="amount" inputmode="decimal" required autocomplete="off"></label>
+      <label data-pay-rate>Курс к ₽<input name="rate" inputmode="decimal" placeholder="текущий"></label>
+      <label class="wide">Заметка<input name="note" maxlength="500" placeholder="необязательно"></label>
+    </div>
+    <div id="ppayPreview" class="pv"></div>
+    <p id="ppayError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Записать</button></div>
+  </form>
+</dialog>
+
+<dialog id="offsetDlg" class="dlg">
+  <form id="offsetForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Взаимозачёт</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p id="offsetWho" class="muted pay-deal"></p>
+    <div class="fields">
+      <label>Сумма, ₽<input name="amount" inputmode="decimal" required autocomplete="off"></label>
+      <label>Дата<input type="date" name="date" required></label>
+      <label class="wide">Заметка<input name="note" maxlength="500" placeholder="необязательно"></label>
+    </div>
+    <div id="offsetPreview" class="pv"></div>
+    <p class="hint">Деньги не двигаются: обе стороны закрываются на одну сумму, самые старые позиции первыми. В итогах месяца — как выручка и закуп.</p>
+    <p id="offsetError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Зачесть</button></div>
+  </form>
+</dialog>
+
+<dialog id="personEditDlg" class="dlg">
+  <form id="personEditForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3 id="personEditTitle">Человек</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="fields">
+      <label>Имя<input name="name" required maxlength="100" placeholder="Иван"></label>
+      <label>@username<input name="username" maxlength="40" autocapitalize="none" placeholder="ivan — если знаете"></label>
+    </div>
+    <p class="hint" id="personEditHint"></p>
+    <div id="personMerge" class="merge">
+      <h4>Это тот же человек, что…</h4>
+      <div class="merge-r"><select name="into" aria-label="С кем объединить"></select><button class="btn" type="button" id="personMergeBtn">Объединить</button></div>
+      <p class="hint">Его сделки, приветка и оплаты перейдут к выбранному, а эта запись удалится.</p>
+    </div>
+    <p id="personEditError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<dialog id="dealPersonDlg" class="dlg">
+  <form id="dealPersonForm" method="dialog" novalidate>
+    <div class="dlg-h"><h3>Чья сделка</h3><button class="icon" type="button" data-close aria-label="Закрыть">×</button></div>
+    <p id="dealPersonDeal" class="muted pay-deal"></p>
+    <div class="fields">
+      <label class="wide">Человек<input name="contact" list="peopleList" required maxlength="100" autocomplete="off" placeholder="Иван (@ivan)"></label>
+    </div>
+    <p class="hint">Знакомый — из подсказки; новый — имя и @username, он заведётся. Долг сделки перейдёт к нему.</p>
+    <p id="dealPersonError" class="err" hidden></p>
+    <div class="dlg-f"><button class="btn" type="button" data-close>Отмена</button><button class="btn btn-primary" type="submit">Сохранить</button></div>
+  </form>
+</dialog>
+
+<datalist id="peopleList"></datalist>
 
 <dialog id="partnerDlg" class="dlg">
   <form id="partnerForm" method="dialog" novalidate>

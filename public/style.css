@@ -311,6 +311,10 @@ tr.total td { font-weight: 700; border-bottom: 0; border-top: 1px solid var(--li
 
 /* ============ ЛЮДИ ============ */
 .chip.ok { color: var(--green); background: rgba(61,220,151,.09); border-color: rgba(61,220,151,.28); }
+/* отметка сделки пришла из аналитики — здесь её не меняют */
+.chip.src { color: var(--accent); background: rgba(87,182,255,.08); border-color: rgba(87,182,255,.26); font-weight: 500; }
+.deal .what small.conflict { color: var(--amber); }
+.deal .what small.conflict::before { content: '⚠ '; }
 .adv { color: var(--violet); }
 .link-ic { border: 0; background: none; padding: 0 0 0 6px; color: var(--dim); font: 500 11px var(--body); cursor: pointer; }
 .link-ic:hover { color: var(--accent); }

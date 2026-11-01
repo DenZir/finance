@@ -270,6 +270,7 @@ function renderTiles(report) {
 // «Что ждёт действия» на обзоре: каждая строка ведёт в свой раздел
 function renderTodo() {
   const unsorted = deals.filter((d) => d.state === 'open' && !d.cancelled).length;
+  const conflicts = deals.filter((d) => d.conflict).length;
   const deb = debtCounts();
   const due = recurringRows.filter((r) => r.active && r.state === 'due');
   const vpnSum = vpnRows.reduce((s, p) => s + p.amount, 0);
@@ -277,6 +278,7 @@ function renderTodo() {
   const items = [
     S.debts.owedToUs && ['people', IC.in, C.green, 'Нам должны', [deb.inPeople ? persons(deb.inPeople) : '', deb.inAds ? `реклама: ${deb.inAds}` : '', deb.inWelcome ? `приветка: ${deb.inWelcome}` : ''].filter(Boolean).join(' · '), `<span class="plus">+${rub(S.debts.owedToUs)}</span>`],
     S.debts.weOwe && ['people', IC.out, C.red, 'Мы должны — закупы', [deb.outPeople ? persons(deb.outPeople) : '', n(S.debts.weOweCount, 'закуп', 'закупа', 'закупов')].filter(Boolean).join(' · '), `<span class="minus">−${rub(S.debts.weOwe)}</span>`],
+    conflicts && ['ads', IC.ads, C.amber, 'Реклама — расходится с аналитикой', 'в аналитике бартер, а здесь есть оплата', String(conflicts)],
     unsorted && ['ads', IC.ads, C.blue, 'Сделки не разобраны', 'оплачено, ждём оплату или бартер', String(unsorted)],
     due.length && ['recurring', IC.recurring, C.violet, 'Регулярные — ждут записи', due.slice(0, 3).map((r) => esc(r.name)).join(', ') + (due.length > 3 ? '…' : ''), `≈ ${rub(due.reduce((s, r) => s + (r.rubEstimate ?? 0), 0))}`],
     vpnRows.length && ['vpn', IC.vpn, C.blue, 'VPN — без платёжки', n(vpnRows.length, 'оплата', 'оплаты', 'оплат'), `<span class="plus">+${rub(vpnSum)}</span>`],
@@ -289,7 +291,7 @@ function renderTodo() {
 // счётчики в меню: что ждёт оплаты или разбора
 function renderBadges() {
   const n = {
-    ads: deals.filter((d) => (d.state === 'waiting' || d.state === 'open') && !d.cancelled).length,
+    ads: deals.filter((d) => ((d.state === 'waiting' || d.state === 'open') && !d.cancelled) || d.conflict).length,
     welcome: S.welcome.count,
     people: S.debts.people,
     recurring: recurringRows.filter((r) => r.active && r.state === 'due').length,
@@ -316,7 +318,9 @@ function dealAge(date) {
   return days < 0 ? `${-days} дн. назад` : `через ${days} дн.`;
 }
 
-// отметить списком можно то, что ещё ждёт решения: не оплаченное, не бартер, не отменённое
+// выбрать галочкой можно то, что ещё ждёт решения: не оплаченное, не бартер, не отменённое.
+// С отметкой из аналитики — тоже: галочки нужны и для «Оплачено» пачкой; отметки
+// «Ждём оплату / Бартер» к таким сервер не применяет (ads.ts, bulkMark)
 const pickable = (d) => (d.state === 'open' || d.state === 'waiting') && !d.cancelled;
 
 // оплатить можно то, что ждёт решения и с суммой
@@ -353,26 +357,33 @@ function dealLine(d, group) {
     : `<span class="${d.kind === 'sale' ? 'plus' : 'minus'}">${d.kind === 'sale' ? '+' : '−'}${rub(covered ? d.remaining : d.amount)}</span>${covered ? `<small>${d.paid ? 'оплачено' : 'аванс покрыл'} ${rub(covered)} из ${rub(d.amount)}</small>` : ''}`;
   const ref = esc(d.ref);
   const waitLabel = d.kind === 'sale' ? 'Ждём оплату' : 'Надо оплатить';
+  // отметку «под оплату / бартер» ставят в аналитике: здесь её не меняют, только платят
+  const ext = !!d.payMode;
+  const src = ext ? `<span class="chip src" title="Отметка «${d.payMode === 'barter' ? 'бартер' : 'под оплату'}» — из аналитики, меняется там">из аналитики</span>` : '';
+  const payBtn = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button>`;
   let acts;
-  if (d.state === 'paid') acts = `<span class="chip ${d.closed ? '' : 'ok'}">${d.closed ? 'прощено' : 'оплачено'}</span>${d.cancelled ? ' <span class="chip warn">отменена в аналитике</span>' : ''}`;
-  else if (d.state === 'barter') acts = `<span class="chip">бартер</span><button class="btn ghost" type="button" data-unbarter="${ref}">Вернуть</button>`;
-  else if (d.cancelled) acts = `<span class="chip">отменена</span>${d.state === 'waiting' ? `<button class="btn ghost" type="button" data-unwait="${ref}">Не ждём</button>` : ''}`;
+  if (d.state === 'paid') acts = `<span class="chip ${d.closed ? '' : 'ok'}">${d.closed ? 'прощено' : 'оплачено'}</span>${src}${d.cancelled ? ' <span class="chip warn">отменена в аналитике</span>' : ''}`;
+  else if (d.state === 'barter') acts = `<span class="chip">бартер</span>${ext ? src : `<button class="btn ghost" type="button" data-unbarter="${ref}">Вернуть</button>`}`;
+  else if (d.cancelled) acts = `<span class="chip">отменена</span>${src}${d.state === 'waiting' && !ext ? `<button class="btn ghost" type="button" data-unwait="${ref}">Не ждём</button>` : ''}`;
   else if (d.state === 'waiting' && part)
     // часть денег уже пришла — это не бартер и не «не разобрана»: снять — удалив оплату в карточке человека
-    acts = `<span class="chip warn">частично</span><button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button>`;
+    acts = `<span class="chip warn">частично</span>${src}${payBtn}`;
+  else if (ext) acts = `${src}${payBtn}`;
   else if (d.state === 'waiting')
-    acts = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-barter="${ref}">Бартер</button><button class="btn ghost" type="button" data-unwait="${ref}" title="Вернуть в неразобранные">×</button>`;
+    acts = `${payBtn}<button class="btn" type="button" data-barter="${ref}">Бартер</button><button class="btn ghost" type="button" data-unwait="${ref}" title="Вернуть в неразобранные">×</button>`;
   else
-    acts = `<button class="btn btn-primary" type="button" data-pay="${ref}">Оплачено</button><button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
-  const done = d.state === 'paid' || d.state === 'barter' || d.cancelled;
+    acts = `${payBtn}<button class="btn" type="button" data-wait="${ref}">${waitLabel}</button><button class="btn" type="button" data-barter="${ref}">Бартер</button>`;
+  // расхождение с аналитикой — на виду, даже у оплаченной
+  const done = (d.state === 'paid' || d.state === 'barter' || d.cancelled) && !d.conflict;
   const sub = [dealWho(d), esc(d.channels), d.state === 'waiting' && !d.cancelled ? `<span class="age">${dealAge(d.date)}</span>` : ''].filter(Boolean).join(' · ');
+  const conflict = d.conflict ? `<small class="conflict">${esc(d.conflict)}</small>` : '';
   const when = !group
     ? dealDay(d.date)
     : pickable(d)
       ? `<label class="pick"><input type="checkbox" data-pick="${ref}" data-g="${group}">${dealDay(d.date)}</label>`
       : `<span class="pick-gap"></span>${dealDay(d.date)}`;
   return `<div class="deal${done ? ' done' : ''}" data-deal="${ref}"><span class="when">${when}</span>
-    <div class="what"><b>${dealTitle(d)}</b><small>${sub}</small></div>
+    <div class="what"><b>${dealTitle(d)}</b><small>${sub}</small>${conflict}</div>
     <div class="sum">${sum}</div><div class="acts">${acts}</div></div>`;
 }
 
@@ -390,9 +401,13 @@ function renderAds() {
     $('#ads').innerHTML = all.map((d) => dealLine(d)).join('');
     return;
   }
+  // расходятся с аналитикой — первыми и только там: владельцу проверить
+  const conflicts = deals.filter((d) => d.conflict);
   // ждём оплату — самые давние сверху: они первые, кому пора напомнить;
-  // оплаченная, но отменённая в аналитике тоже на виду
-  const waiting = deals.filter((d) => (d.state === 'waiting' && !d.cancelled) || (d.state === 'paid' && d.cancelled) || (d.state === 'waiting' && d.cancelled));
+  // оплаченная, но отменённая в аналитике тоже на виду. Отменённую с отметкой
+  // аналитики — нет: «Не ждём» у неё не нажать, и она висела бы вечно, а долгом
+  // отменённая и так не считается.
+  const waiting = deals.filter((d) => !d.conflict && ((d.state === 'waiting' && !d.cancelled) || (d.state === 'paid' && d.cancelled) || (d.state === 'waiting' && d.cancelled && !d.payMode)));
   const unsorted = deals.filter((d) => d.state === 'open' && !d.cancelled);
   const group = (key, title, list, empty) => {
     const head = `${title}${list.length ? ` · ${list.length}` : ''}`;
@@ -403,6 +418,7 @@ function renderAds() {
   const people = peopleToPay();
   const byPerson = people.length ? `<h3 class="ads-h">Оплатить у человека · ${people.length}</h3>${people.map(personLine).join('')}` : '';
   $('#ads').innerHTML =
+    (conflicts.length ? group('conflict', 'Расходятся с аналитикой', conflicts, '') : '') +
     byPerson +
     group('waiting', 'Ждём оплату', waiting, 'Никто никому не должен.') + unknown +
     (unsorted.length ? group('unsorted', 'Не разобраны', unsorted, '') : '');
@@ -424,6 +440,9 @@ function syncPick() {
   const noSum = list.filter((d) => d.amount == null).length;
   const money = [has('sale') ? `<span class="plus">+${rub(sum('sale'))}</span>` : '', has('buy') ? `<span class="minus">−${rub(sum('buy'))}</span>` : ''].filter(Boolean).join(' / ');
   $('#adsPicked').innerHTML = `<b>Выбрано ${list.length}</b> · ${money}${noSum ? ` <span class="muted">· без суммы: ${noSum}</span>` : ''}`;
+  // все выбранные размечены аналитикой — отмечать здесь нечего, остаётся «Оплачено»
+  const allExt = list.every((d) => d.payMode);
+  for (const b of $('#adsBar').querySelectorAll('[data-bulk]')) b.hidden = allExt;
 }
 
 // --- доход: итог, доли, график и лента дней ----------------------------------------
@@ -1848,9 +1867,12 @@ $('#adsBar').addEventListener('click', async (e) => {
   const buttons = $('#adsBar').querySelectorAll('button');
   for (const x of buttons) x.disabled = true;
   try {
+    // сколько из выбранных размечено аналитикой — сервер их пропустит (ads.ts, bulkMark)
+    const ext = deals.filter((d) => picked.has(d.ref) && d.payMode).length;
     const r = await api('/api/ad-deals/bulk', { method: 'POST', body: JSON.stringify({ refs: [...picked], action: b.dataset.bulk }) });
     await load();
-    toast(`Отмечено: ${r.changed}${r.skipped ? `, пропущено: ${r.skipped}` : ''}`);
+    const other = Math.max(0, r.skipped - ext);
+    toast([`Отмечено: ${r.changed}`, ext ? `пропущено ${ext} — отметка ведётся в аналитике` : '', other ? `пропущено: ${other}` : ''].filter(Boolean).join(', '));
   } catch (err) {
     toast(err.message);
   } finally {

@@ -268,7 +268,8 @@ test('«Простить остаток»: позиция закрыта, дол
 test('миграция: люди из контактов, фиксации — в первую ссылку, прежние оплаты целы', () => {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  const before = MIGRATIONS.length - 1;
+  // до миграции людей — по её содержимому, а не «последняя»: за ней идут новые
+  const before = MIGRATIONS.findIndex((m) => m.includes('CREATE TABLE people ('));
   for (const m of MIGRATIONS.slice(0, before)) db.exec(m);
   db.pragma(`user_version = ${before}`);
   const ins = db.prepare(`INSERT INTO ad_deals (ref, kind, date, slot, contact, channels, amount, waiting_at, synced_at) VALUES (?, ?, '2026-10-05', 'evening', ?, '', ?, 1, 1)`);

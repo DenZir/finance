@@ -13,6 +13,10 @@
  * С 2026-10-31 долг считается по человеку (debts.ts): сделка — позиция его
  * долга, оплата бывает частичной, а «Оплачено» здесь — оплата у человека по
  * одной этой позиции. Человек сделки — по контакту из аналитики (people.ts).
+ *
+ * С 2026-11-01 отметку «под оплату / бартер» ставят в аналитике (payMode), и
+ * сверка переносит её сюда; руками здесь размечаются только старые сделки без
+ * неё. Оплаты это не касается: деньги записываются здесь, как и раньше.
  */
 import type { Db } from './db/index.js';
 import { MICRO, MoneyInputError } from './money.js';
@@ -32,7 +36,23 @@ export interface AnalyticsDeal {
   amount: number | null;
   contact: string;
   channels: string[];
+  /**
+   * Отметка из аналитики: paid — под оплату («Ждём оплату»), barter — бартер,
+   * null — не поставлена (все старые сделки). Сборки аналитики до 2026-11-01
+   * поля не присылают — это то же, что null.
+   */
+  payMode?: PayMode | null;
 }
+
+export type PayMode = 'barter' | 'paid';
+
+/** Отметка аналитики как есть или null: незнакомое значение — не отметка, а не повод уронить сверку. */
+export function parsePayMode(v: unknown): PayMode | null {
+  return v === 'barter' || v === 'paid' ? v : null;
+}
+
+/** Отказ ручной отметке сделки, которую размечает аналитика. */
+const ANALYTICS_MARK = 'отметка бартер/под оплату ведётся в аналитике';
 
 export type FetchDeals = (since: string) => Promise<AnalyticsDeal[]>;
 
@@ -59,18 +79,30 @@ const mskDate = (ms: number) => new Date(ms + 3 * 3600_000).toISOString().slice(
  * Сверка с аналитикой: новые сделки добавляются, известные получают свежие
  * сумму, дату и статус. Сделка, которой в ответе больше нет (удалили), —
  * отменённая: решение по ней не трогается, но ждать её перестают.
+ *
+ * Отметка аналитики (payMode) запоминается и ставит состояние: paid — «Ждём
+ * оплату», barter — «Бартер»; при каждой сверке, так что смена в аналитике
+ * переворачивает сделку. Без отметки сделка не трогается: старые владелец
+ * разбирает руками (просил их не трогать, 2026-11-01). Сделку, по которой уже
+ * есть деньги, отметка не переворачивает — оплату снимают только удалением
+ * операции; бартер при оплате показывается расхождением (listDeals, conflict).
  */
 export async function syncDeals(db: Db, deps: { fetchDeals: FetchDeals; since: number }, now = Date.now()): Promise<{ added: number }> {
   const deals = await deps.fetchDeals(mskDate(deps.since));
   const known = new Set((db.prepare('SELECT ref FROM ad_deals').all() as { ref: string }[]).map((r) => r.ref));
   const upsert = db.prepare(
-    `INSERT INTO ad_deals (ref, kind, date, slot, contact, channels, amount, cancelled, synced_at)
-     VALUES (@ref, @kind, @date, @slot, @contact, @channels, @amount, @cancelled, @now)
+    `INSERT INTO ad_deals (ref, kind, date, slot, contact, channels, amount, cancelled, pay_mode, synced_at)
+     VALUES (@ref, @kind, @date, @slot, @contact, @channels, @amount, @cancelled, @payMode, @now)
      ON CONFLICT(ref) DO UPDATE SET date = excluded.date, slot = excluded.slot, contact = excluded.contact,
-       channels = excluded.channels, amount = excluded.amount, cancelled = excluded.cancelled, synced_at = excluded.synced_at`
+       channels = excluded.channels, amount = excluded.amount, cancelled = excluded.cancelled,
+       pay_mode = excluded.pay_mode, synced_at = excluded.synced_at`
   );
+  // COALESCE — чтобы «с какого дня ждём» не сдвигалось каждой сверкой
+  const markWaiting = db.prepare('UPDATE ad_deals SET waiting_at = COALESCE(waiting_at, ?), barter_at = NULL WHERE ref = ?');
+  const markBarter = db.prepare('UPDATE ad_deals SET barter_at = COALESCE(barter_at, ?), waiting_at = NULL WHERE ref = ?');
   let added = 0;
   db.transaction(() => {
+    const paid = paidByRef(db);
     for (const d of deals) {
       if (!REF.test(d.ref) || (d.kind !== 'buy' && d.kind !== 'sale')) continue;
       if (!known.has(d.ref)) added++;
@@ -83,8 +115,12 @@ export async function syncDeals(db: Db, deps: { fetchDeals: FetchDeals; since: n
         channels: (d.channels ?? []).join(', '),
         amount: typeof d.amount === 'number' && Number.isFinite(d.amount) ? Math.round(d.amount * MICRO) : null,
         cancelled: d.status === 'cancel' ? 1 : 0,
+        payMode: parsePayMode(d.payMode),
         now,
       });
+      const mode = parsePayMode(d.payMode);
+      if (mode === null || paid.has(d.ref)) continue;
+      (mode === 'paid' ? markWaiting : markBarter).run(now, d.ref);
     }
     // Удалённые в аналитике: их просто нет в ответе за тот же период.
     const seen = new Set(deals.map((d) => d.ref));
@@ -127,6 +163,10 @@ export interface AdDealView {
   personId: number | null;
   /** остаток прощён («Простить остаток») */
   closed: boolean;
+  /** отметка из аналитики; null — размечается руками здесь */
+  payMode: PayMode | null;
+  /** отметка аналитики расходится с тем, что записано здесь, — владельцу проверить */
+  conflict: string | null;
 }
 
 /**
@@ -151,6 +191,9 @@ export function listDeals(db: Db): AdDealView[] {
       remaining: item?.remaining ?? 0,
       personId: r.person_id ?? null,
       closed: item?.state === 'closed',
+      payMode: parsePayMode(r.pay_mode),
+      // бартер по аналитике, а деньги здесь записаны: сверка оплату не снимает
+      conflict: r.pay_mode === 'barter' && p ? 'в аналитике — бартер, а здесь есть оплата: проверьте' : null,
     };
   });
 }
@@ -235,6 +278,7 @@ function payWhole(db: Db, d: AdDealView, input: { walletId: number; amount: numb
 /** «Бартер» и отмена этой отметки. Оплаченную сначала распаровывают удалением оплаты. */
 export function setBarter(db: Db, ref: string, on: boolean, now = Date.now()): void {
   const d = getDeal(db, ref);
+  if (d.payMode) throw new MoneyInputError(ANALYTICS_MARK);
   if (on && d.state === 'paid') throw new MoneyInputError('сделка уже оплачена — удалите операцию, если это был бартер');
   if (on && d.paid > 0) throw new MoneyInputError('сделка оплачена частично — удалите оплату, если это был бартер');
   db.prepare(on ? 'UPDATE ad_deals SET barter_at = ?, waiting_at = NULL WHERE ref = ?' : 'UPDATE ad_deals SET barter_at = ? WHERE ref = ?').run(on ? now : null, ref);
@@ -246,6 +290,7 @@ export function setBarter(db: Db, ref: string, on: boolean, now = Date.now()): v
  */
 export function setWaiting(db: Db, ref: string, on: boolean, now = Date.now()): void {
   const d = getDeal(db, ref);
+  if (d.payMode) throw new MoneyInputError(ANALYTICS_MARK);
   if (on && d.state === 'paid') throw new MoneyInputError('сделка уже оплачена');
   db.prepare(on ? 'UPDATE ad_deals SET waiting_at = ?, barter_at = NULL WHERE ref = ?' : 'UPDATE ad_deals SET waiting_at = ? WHERE ref = ?').run(on ? now : null, ref);
 }
@@ -262,7 +307,7 @@ const BULK_MAX = 500;
  * одной транзакцией, чтобы «Нам должны» не сошлись наполовину. Оплаченные и
  * неизвестные пропускаются, а не роняют список: оплату снимают удалением
  * операции. Сделка, уже стоящая в этом состоянии, не трогается и в «Отмечено»
- * не входит.
+ * не входит. Сделки с отметкой аналитики тоже пропускаются: её ставят там.
  */
 export function bulkMark(db: Db, refs: readonly string[], action: BulkAction, now = Date.now()): { changed: number; skipped: number } {
   if (!BULK_ACTIONS.includes(action)) throw new MoneyInputError('неизвестная отметка');
@@ -279,8 +324,9 @@ export function bulkMark(db: Db, refs: readonly string[], action: BulkAction, no
     let skipped = 0;
     for (const ref of new Set(refs)) {
       const d = byRef.get(ref);
-      // оплаченные и частично оплаченные: деньги уже были, отметкой их не снять
-      if (!d || d.state === 'paid' || d.paid > 0) {
+      // оплаченные и частично оплаченные: деньги уже были, отметкой их не снять;
+      // размеченные аналитикой: следующая сверка всё равно вернула бы её отметку
+      if (!d || d.state === 'paid' || d.paid > 0 || d.payMode) {
         skipped++;
         continue;
       }

@@ -22,7 +22,7 @@ const at = (day: number, h: number, min = 0) => Date.UTC(2026, 9, day, h, min) -
 
 const view = (ref: string, over: Partial<AdDealView>): AdDealView => ({
   ref, kind: ref.startsWith('buy') ? 'buy' : 'sale', date: '2026-10-17', slot: 'evening', contact: '', channels: 'SATAN GAMES',
-  amount: null, cancelled: false, state: 'waiting', opId: null, paid: 0, remaining: 0, personId: null, closed: false, ...over,
+  amount: null, cancelled: false, state: 'waiting', opId: null, paid: 0, remaining: 0, personId: null, closed: false, payMode: null, conflict: null, ...over,
 });
 
 const item = (ref: string, over: Partial<DebtItem>): DebtItem => ({

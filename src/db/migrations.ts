@@ -383,4 +383,10 @@ export const MIGRATIONS: readonly string[] = [
     note TEXT    NOT NULL DEFAULT ''
   );
   `,
+  `
+  -- Отметка сделки из аналитики (владелец, 2026-11-01): 'paid' — под оплату,
+  -- 'barter' — бартер, null — не поставлена (все старые сделки). Сверка ставит
+  -- по ней waiting_at / barter_at; ручные отметки — только у сделок без неё.
+  ALTER TABLE ad_deals ADD COLUMN pay_mode TEXT;
+  `,
 ];
